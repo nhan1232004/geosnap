@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile data",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "Photo": {
+      "title": "Photo",
+      "description": "Photo uploaded by the user",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The creator's UID" },
+        "url": { "type": "string", "format": "uri" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "takenAt": { "type": "timestamp" },
+        "uploadedAt": { "type": "timestamp" },
+        "hasGps": { "type": "boolean" },
+        "folderId": { "type": "string", "description": "ID of LocationFolder" }
+      },
+      "required": ["uid", "url", "uploadedAt", "hasGps"]
+    },
+    "LocationFolder": {
+      "title": "Location Folder",
+      "description": "Cluster of photos nearby",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "country": { "type": "string" },
+        "city": { "type": "string" },
+        "district": { "type": "string" },
+        "street": { "type": "string" },
+        "centerLat": { "type": "number" },
+        "centerLng": { "type": "number" },
+        "coverPhotoUrl": { "type": "string" },
+        "photoCount": { "type": "number" },
+        "firstVisitedAt": { "type": "timestamp" },
+        "lastVisitedAt": { "type": "timestamp" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["uid", "name", "centerLat", "centerLng", "photoCount", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "photos/{photoId}": {
+      "schema": { "$ref": "#/entities/Photo" },
+      "description": "Photos"
+    },
+    "folders/{folderId}": {
+      "schema": { "$ref": "#/entities/LocationFolder" },
+      "description": "Location folders"
+    }
+  }
+}

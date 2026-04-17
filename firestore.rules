@@ -1,0 +1,157 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (matches auth.uid)
+    // Fields:
+    //   - uid: string (matches userId)
+    //   - email: string (email format)
+    //   - displayName: string (max 100)
+    //   - avatarUrl: string (max 2048)
+    //   - role: string (admin, user) - immutable for non-admins
+    //   - createdAt: timestamp - immutable
+    //
+    // Collection: photos
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (matches auth.uid) - immutable
+    //   - url: string (max 2048)
+    //   - latitude: number
+    //   - longitude: number
+    //   - takenAt: timestamp
+    //   - uploadedAt: timestamp
+    //   - hasGps: boolean
+    //   - folderId: string (max 50)
+    //
+    // Collection: folders
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (matches auth.uid) - immutable
+    //   - name: string (max 200)
+    //   - country: string (max 100)
+    //   - city: string (max 100)
+    //   - district: string (max 100)
+    //   - street: string (max 100)
+    //   - centerLat: number
+    //   - centerLng: number
+    //   - coverPhotoUrl: string (max 2048)
+    //   - photoCount: number (>= 0)
+    //   - firstVisitedAt: timestamp
+    //   - lastVisitedAt: timestamp
+    //   - createdAt: timestamp
+    //
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+    
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+    
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function validOptionalStringLength(field, maxLen) {
+      return !(field in request.resource.data) || 
+        (request.resource.data[field] is string && request.resource.data[field].size() <= maxLen);
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "nguoicoich1234@gmail.com" && request.auth.token.email_verified == true));
+    }
+    
+    // Domain Validators
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'role', 'createdAt']) &&
+             data.uid is string &&
+             data.email is string && data.email.size() <= 200 &&
+             data.role in ['admin', 'user'] &&
+             data.createdAt is string &&
+             validOptionalStringLength('displayName', 100) &&
+             validOptionalStringLength('avatarUrl', 2048);
+    }
+    
+    function isValidPhoto(data) {
+      return hasRequiredFields(['uid', 'url', 'uploadedAt', 'hasGps']) &&
+             data.uid is string &&
+             data.url is string && data.url.size() <= 10485760 &&
+             data.uploadedAt is string &&
+             data.hasGps is bool &&
+             (!( 'latitude' in data ) || data.latitude is number) &&
+             (!( 'longitude' in data ) || data.longitude is number) &&
+             (!( 'takenAt' in data ) || data.takenAt is string) &&
+             (!( 'folderId' in data ) || data.folderId is string);
+    }
+    
+    function isValidFolder(data) {
+      return hasRequiredFields(['uid', 'name', 'centerLat', 'centerLng', 'photoCount', 'createdAt']) &&
+             data.uid is string &&
+             data.name is string && data.name.size() <= 500 &&
+             data.centerLat is number &&
+             data.centerLng is number &&
+             data.photoCount is number && data.photoCount >= 0 &&
+             data.createdAt is string &&
+             validOptionalStringLength('country', 100) &&
+             validOptionalStringLength('city', 100) &&
+             validOptionalStringLength('district', 100) &&
+             validOptionalStringLength('street', 100) &&
+             validOptionalStringLength('coverPhotoUrl', 10485760) &&
+             (!( 'firstVisitedAt' in data ) || data.firstVisitedAt is string) &&
+             (!( 'lastVisitedAt' in data ) || data.lastVisitedAt is string);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    uidUnchanged() && 
+                    ((request.resource.data.role == 'user') || isAdmin());
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.role == resource.data.role &&
+                    request.resource.data.createdAt == resource.data.createdAt) || 
+                    (isAdmin() && isValidUser(request.resource.data));
+    }
+    
+    match /photos/{photoId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidPhoto(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidPhoto(request.resource.data) && 
+                    uidNotModified() &&
+                    request.resource.data.uploadedAt == resource.data.uploadedAt;
+      allow delete: if isDocOwner() || isAdmin();
+    }
+    
+    match /folders/{folderId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidFolder(request.resource.data) && uidUnchanged();
+      allow update: if isDocOwner() && isValidFolder(request.resource.data) &&
+                    uidNotModified() &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner() || isAdmin();
+    }
+  }
+}
