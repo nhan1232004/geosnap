@@ -1,0 +1,366 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+/* ===== THEME SYSTEM ===== */
+:root {
+  --color-bg-deep: #f8f9fb;
+  --color-bg-surface: #ffffff;
+  --color-bg-card: rgba(255, 255, 255, 0.85);
+  --color-surface: #f1f3f6;
+  --color-brand: #ff6b35;
+  --color-brand-light: #ff8f66;
+  --color-text-main: #1a1d22;
+  --color-text-dim: #6b7280;
+  --color-text-heading: #0f1115;
+  --color-border-dim: rgba(0, 0, 0, 0.08);
+  --color-glass: rgba(0, 0, 0, 0.03);
+  --color-sidebar-bg: rgba(255, 255, 255, 0.92);
+  --color-card-hover: rgba(255, 107, 53, 0.06);
+  --color-input-bg: #f1f3f6;
+  --color-overlay: rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 40px rgba(0,0,0,0.08);
+}
+
+.dark {
+  --color-bg-deep: #08090a;
+  --color-bg-surface: #121417;
+  --color-bg-card: rgba(30, 33, 38, 0.7);
+  --color-surface: #1a1d22;
+  --color-brand: #ff6b35;
+  --color-brand-light: #ff8f66;
+  --color-text-main: #e2e4e9;
+  --color-text-dim: #8a8f98;
+  --color-text-heading: #ffffff;
+  --color-border-dim: rgba(255, 255, 255, 0.08);
+  --color-glass: rgba(255, 255, 255, 0.03);
+  --color-sidebar-bg: rgba(0, 0, 0, 0.7);
+  --color-card-hover: rgba(255, 107, 53, 0.08);
+  --color-input-bg: #1a1d22;
+  --color-overlay: rgba(0, 0, 0, 0.8);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-lg: 0 10px 40px rgba(0,0,0,0.4);
+}
+
+@theme {
+  --color-bg-deep: var(--color-bg-deep);
+  --color-bg-surface: var(--color-bg-surface);
+  --color-bg-card: var(--color-bg-card);
+  --color-surface: var(--color-surface);
+  --color-brand: var(--color-brand);
+  --color-brand-light: var(--color-brand-light);
+  --color-text-main: var(--color-text-main);
+  --color-text-dim: var(--color-text-dim);
+  --color-text-heading: var(--color-text-heading);
+  --color-border-dim: var(--color-border-dim);
+  --color-glass: var(--color-glass);
+  --color-sidebar-bg: var(--color-sidebar-bg);
+  --color-card-hover: var(--color-card-hover);
+  --color-input-bg: var(--color-input-bg);
+  --color-overlay: var(--color-overlay);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--color-bg-deep);
+  color: var(--color-text-main);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Atmospheric Background */
+.atmosphere {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 80% 20%, rgba(255, 107, 53, 0.06) 0%, transparent 40%),
+    radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.04) 0%, transparent 40%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+:root .atmosphere {
+  background:
+    radial-gradient(circle at 80% 20%, rgba(255, 107, 53, 0.04) 0%, transparent 40%),
+    radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.03) 0%, transparent 40%);
+}
+
+/* Map Popups Override */
+.leaflet-popup-content-wrapper {
+  background-color: var(--color-bg-surface);
+  color: var(--color-text-main);
+  border: 1px solid var(--color-border-dim);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.leaflet-popup-tip {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-dim);
+}
+
+.custom-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 16px;
+}
+
+/* Lightbox overlay */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+@keyframes progressBar {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.slide-up {
+  animation: slideUp 0.2s ease;
+}
+
+.scale-in {
+  animation: scaleIn 0.2s ease;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-dim);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
+}
+
+/* Story ring gradient */
+.story-ring {
+  background: conic-gradient(from 0deg, #ff6b35, #f59e0b, #ef4444, #8b5cf6, #3b82f6, #ff6b35);
+  padding: 3px;
+  border-radius: 9999px;
+}
+
+.story-ring-seen {
+  background: var(--color-border-dim);
+  padding: 3px;
+  border-radius: 9999px;
+}
+
+/* Mobile bottom nav */
+@media (max-width: 767px) {
+  .desktop-sidebar {
+    display: none !important;
+  }
+  .mobile-bottom-nav {
+    display: flex !important;
+  }
+  .main-content {
+    padding-bottom: 72px !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .mobile-bottom-nav {
+    display: none !important;
+  }
+}
+
+/* Theme transition */
+*, *::before, *::after {
+  transition-property: background-color, border-color, box-shadow;
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+
+/* Override for specific elements that should NOT transition */
+img, video, canvas, svg, .no-transition {
+  transition-property: none !important;
+}
+
+/* ===== ENHANCED ANIMATIONS ===== */
+
+/* Card hover lift effect */
+.card-hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+.card-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(255, 107, 53, 0.12);
+}
+
+/* Brand pulse glow */
+@keyframes brandPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(255, 107, 53, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(255, 107, 53, 0.6); }
+}
+
+.brand-pulse {
+  animation: brandPulse 2.5s ease-in-out infinite;
+}
+
+/* Loading shimmer skeleton */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    var(--color-card-hover) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Stagger animation for list items */
+@keyframes staggerIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-item {
+  animation: staggerIn 0.3s ease forwards;
+}
+.stagger-item:nth-child(1) { animation-delay: 0ms; }
+.stagger-item:nth-child(2) { animation-delay: 50ms; }
+.stagger-item:nth-child(3) { animation-delay: 100ms; }
+.stagger-item:nth-child(4) { animation-delay: 150ms; }
+.stagger-item:nth-child(5) { animation-delay: 200ms; }
+.stagger-item:nth-child(6) { animation-delay: 250ms; }
+
+/* Page transition */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: pageEnter 0.25s ease;
+}
+
+/* Notification badge bounce */
+@keyframes badgeBounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+.badge-bounce {
+  animation: badgeBounce 0.3s ease;
+}
+
+/* Floating action button */
+@keyframes floatUp {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-4px); }
+}
+
+/* Input focus glow */
+.input-glow:focus {
+  box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.15);
+}
+
+/* Glass card effect */
+.glass-card {
+  background: var(--color-bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border-dim);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #ff6b35, #f59e0b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Success animation */
+@keyframes checkmark {
+  0% { stroke-dashoffset: 100; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* Map marker pulse */
+@keyframes markerPulse {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+.marker-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(255, 107, 53, 0.4);
+  animation: markerPulse 1.5s ease-out infinite;
+}
+
+/* Smooth image reveal */
+@keyframes imageReveal {
+  from { opacity: 0; filter: blur(8px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+.image-reveal {
+  animation: imageReveal 0.4s ease;
+}
+
+/* Online status dot */
+@keyframes onlinePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.online-dot {
+  animation: onlinePulse 2s ease-in-out infinite;
+}

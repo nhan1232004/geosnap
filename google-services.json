@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "1053002963099",
+    "project_id": "geosnap-4dd7a",
+    "storage_bucket": "geosnap-4dd7a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1053002963099:android:ae6105149819ceeb510e3e",
+        "android_client_info": {
+          "package_name": "com.geosnap.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1053002963099-0seqck1lmpu76pmh3hblr29jo42putbp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDnyTZjccAe5Juq6DyBU2wXw62n3O-CJJE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1053002963099-0seqck1lmpu76pmh3hblr29jo42putbp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

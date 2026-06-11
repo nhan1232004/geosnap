@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">geosnap</string>
+    <string name="title_activity_main">geosnap</string>
+    <string name="package_name">com.geosnap.app</string>
+    <string name="custom_url_scheme">com.geosnap.app</string>
+</resources>

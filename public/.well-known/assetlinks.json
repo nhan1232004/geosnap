@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.geosnap.app",
+    "sha256_cert_fingerprints": [
+      "D9:50:82:A9:9C:B5:3B:A9:0E:3E:95:25:43:B7:E2:AB:B4:45:61:B2:5D:17:8D:44:F4:E7:13:55:E5:22:E6:04"
+    ]
+  }
+}]

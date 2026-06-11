@@ -1,0 +1,707 @@
+# KẾ HOẠCH DỰ ÁN: ỨNG DỤNG GHI NHỚ ĐỊA ĐIỂM BẰNG HÌNH ẢNH
+# Tên: GeoSnap
+# Loại: Web Application (Social Photo-Location Network)
+# Quy mô: Solo developer
+# Giai đoạn: Thiết kế chi tiết
+
+---
+
+## 1. MÔ TẢ DỰ ÁN
+
+GeoSnap là một web app cho phép người dùng upload ảnh đã chụp tại các địa điểm. Ứng dụng tự động đọc tọa độ GPS từ metadata EXIF của ảnh, sau đó nhóm các ảnh gần nhau thành một "folder địa điểm". Người dùng có thể duyệt lại các địa điểm đã đến theo hai chế độ: theo dòng thời gian (timeline) hoặc theo khu vực địa lý trên bản đồ.
+
+Điểm khác biệt: GeoSnap không chỉ là app cá nhân — đây là một mạng xã hội địa điểm nhỏ, cho phép kết nối bạn bè, xem hành trình của nhau, và gửi lời mời kết bạn qua link (giống cơ chế của Locket).
+
+Mục tiêu cốt lõi:
+- Upload ảnh lên và tự động nhận diện địa điểm từ GPS EXIF
+- Gom nhóm các ảnh cùng địa điểm (trong bán kính ~200m) thành một folder
+- Đặt tên folder tự động dựa vào reverse geocoding (tên phố, quận, thành phố)
+- Xem danh sách folder theo thời gian (tháng/năm)
+- Xem folder trên bản đồ theo khu vực địa lý
+- Hỗ trợ gắn địa điểm thủ công cho ảnh không có GPS
+- Đăng nhập bằng Facebook/Google
+- Kết bạn qua invite link duy nhất
+- Xem social feed từ bạn bè
+- Privacy control: public/friends/private
+
+---
+
+## 2. LUỒNG HOẠT ĐỘNG CHÍNH
+
+### 2.1 Luồng Upload & Xử Lý Ảnh
+Bước 1: Người dùng upload một hoặc nhiều ảnh
+Bước 2: Server đọc metadata EXIF từ mỗi ảnh để lấy tọa độ GPS (latitude, longitude) và thời gian chụp
+Bước 3: Nếu ảnh không có GPS, hiển thị giao diện cho phép người dùng chọn vị trí trên bản đồ
+Bước 4: Hệ thống thực hiện reverse geocoding để chuyển tọa độ thành tên địa điểm (tên đường, quận, thành phố, quốc gia)
+Bước 5: Thuật toán clustering (DBSCAN) gom các ảnh có tọa độ trong bán kính ~200m thành cùng một folder
+Bước 6: Ảnh được lưu vào storage, metadata lưu vào database
+Bước 7: Người dùng duyệt ảnh qua hai chế độ: Timeline View hoặc Map View
+
+### 2.2 Luồng Kết Bạn Qua Invite Link (Như Locket)
+Bước 1: User A vào trang Profile → copy invite link dạng: https://geosnap.app/invite/abc123
+Bước 2: User A gửi link cho bạn qua Zalo, Facebook, Messenger, v.v.
+Bước 3: Bạn click link → thấy trang preview profile của User A (avatar, tên, số địa điểm đã đến)
+Bước 4: Bạn nhấn "Kết bạn với [Tên]"
+Bước 5a: Nếu bạn đã có account → đăng nhập → tự động gửi friend request
+Bước 5b: Nếu chưa có account → đăng ký (hoặc đăng nhập Facebook) → sau đó tự động gửi friend request
+Bước 6: User A nhận notification "Bạn X muốn kết bạn với bạn"
+Bước 7: User A chấp nhận → hai bên là bạn bè, thấy được hành trình của nhau (tùy privacy setting)
+
+### 2.3 Luồng Đăng Nhập Facebook
+Bước 1: Click "Đăng nhập với Facebook" trên trang login
+Bước 2: Redirect đến Facebook OAuth
+Bước 3: User đồng ý → nhận access token từ Facebook
+Bước 4: Supabase Auth xác thực và tạo session
+Bước 5: Lưu facebook_id và lấy avatar từ Facebook vào bảng user_profiles
+Bước 6: Nếu user mới → tạo invite_code ngẫu nhiên tự động
+
+---
+
+## 3. STACK CÔNG NGHỆ
+
+### Frontend
+- Framework: Next.js 14+ với App Router
+- UI Library: React 18
+- Styling: Tailwind CSS
+- Bản đồ: Mapbox GL JS (free 50.000 request/tháng) hoặc Leaflet.js (open-source hoàn toàn)
+- Quản lý state: Zustand hoặc React Context
+- Upload ảnh: react-dropzone
+- Realtime: Supabase Realtime (websocket cho notifications)
+
+### Backend
+- Runtime: Node.js
+- Framework: Next.js API Routes
+- Đọc EXIF: thư viện exifr (JavaScript, nhẹ, hỗ trợ GPS đầy đủ)
+- Clustering địa điểm: tự implement thuật toán DBSCAN đơn giản hoặc dùng thư viện density-clustering
+- Invite code: nanoid (sinh code ngắn, đẹp, unique)
+
+### Database
+- Hệ quản trị: Supabase (PostgreSQL hosted)
+- Extension: PostGIS để query địa lý (lấy tất cả địa điểm trong vùng, tính khoảng cách)
+- Auth: Supabase Auth (email/password, Google OAuth, Facebook OAuth)
+- Realtime: Supabase Realtime cho notifications
+- Free tier: 500MB database, đủ cho hàng triệu bản ghi metadata ảnh
+
+### Lưu trữ ảnh
+- Service: Cloudinary
+- Lý do: tự động resize, tạo thumbnail, CDN toàn cầu, SDK đơn giản
+- Free tier: 25GB storage, 25GB bandwidth/tháng
+- Thay thế: Supabase Storage (nếu muốn all-in-one, free 1GB)
+
+### Reverse Geocoding
+- Service: Nominatim (OpenStreetMap) - miễn phí hoàn toàn, không cần API key
+- API endpoint: https://nominatim.openstreetmap.org/reverse
+- Lưu ý: giới hạn 1 request/giây, cần cache kết quả vào database sau lần đầu gọi
+
+### Auth & Social
+- Facebook OAuth: Supabase Auth Provider (cần Facebook Developer App)
+- Google OAuth: Supabase Auth Provider (đã có sẵn)
+- Invite system: nanoid generate, lưu trong user_profiles.invite_code
+
+### Deploy
+- Frontend + Backend: Vercel (free tier, tự động CI/CD từ GitHub)
+- Database: Supabase cloud (free tier)
+- Storage: Cloudinary (free tier)
+- Chi phí ban đầu: 0 đồng
+
+---
+
+## 4. CẤU TRÚC DATABASE
+
+### Bảng user_profiles (mở rộng từ Supabase auth.users)
+- id: uuid (primary key, FK -> auth.users)
+- display_name: text
+- username: text UNIQUE          -- @username để mention, hiển thị trên URL profile
+- avatar_url: text
+- bio: text                      -- Giới thiệu ngắn
+- invite_code: text UNIQUE       -- Code cho invite link (VD: "abc123")
+- facebook_id: text              -- ID Facebook nếu đăng nhập bằng Facebook
+- total_countries: integer DEFAULT 0
+- total_cities: integer DEFAULT 0
+- total_photos: integer DEFAULT 0
+- is_public: boolean DEFAULT true -- Profile có public không
+- created_at: timestamp
+
+### Bảng photos
+- id: uuid (primary key)
+- user_id: uuid (foreign key -> user_profiles.id)
+- cloudinary_url: text (URL ảnh gốc)
+- thumbnail_url: text (URL ảnh đã resize nhỏ)
+- latitude: float8
+- longitude: float8
+- location: geography(Point, 4326) -- PostGIS column để query địa lý
+- taken_at: timestamp (lấy từ EXIF, nếu không có thì dùng thời gian upload)
+- uploaded_at: timestamp
+- has_gps: boolean
+- file_size: integer
+- width: integer
+- height: integer
+
+### Bảng location_folders
+- id: uuid (primary key)
+- user_id: uuid (foreign key -> user_profiles.id)
+- name: text (ví dụ: "Quận 1, TP.HCM")
+- short_name: text (tên ngắn gọn, ví dụ: "Quận 1")
+- country: text
+- city: text
+- district: text
+- street: text
+- center_lat: float8 (tâm của cluster)
+- center_lng: float8
+- cover_photo_id: uuid (ảnh đại diện folder)
+- photo_count: integer
+- first_visited_at: timestamp
+- last_visited_at: timestamp
+- created_at: timestamp
+- visibility: text DEFAULT 'private'  -- 'private' | 'friends' | 'public'
+- description: text                   -- Mô tả thủ công của user
+- reaction_count: jsonb DEFAULT '{}'  -- {"❤️": 5, "🔥": 3, "✈️": 1}
+
+### Bảng photo_folder_relations
+- photo_id: uuid (foreign key -> photos.id)
+- folder_id: uuid (foreign key -> location_folders.id)
+- PRIMARY KEY (photo_id, folder_id)
+
+### Bảng friendships
+- id: uuid (primary key)
+- requester_id: uuid (FK -> user_profiles.id)   -- Người gửi lời mời
+- addressee_id: uuid (FK -> user_profiles.id)   -- Người nhận lời mời
+- status: text -- 'pending' | 'accepted' | 'blocked'
+- created_at: timestamp
+- updated_at: timestamp
+- UNIQUE(requester_id, addressee_id)
+
+### Bảng reactions
+- id: uuid (primary key)
+- user_id: uuid (FK -> user_profiles.id)
+- folder_id: uuid (FK -> location_folders.id)
+- emoji: text  -- '❤️', '🔥', '✈️', '📍', '😍'
+- created_at: timestamp
+- UNIQUE(user_id, folder_id, emoji)
+
+### Bảng comments
+- id: uuid (primary key)
+- user_id: uuid (FK -> user_profiles.id)
+- folder_id: uuid (FK -> location_folders.id)
+- content: text
+- created_at: timestamp
+
+### Bảng notifications
+- id: uuid (primary key)
+- recipient_id: uuid (FK -> user_profiles.id)
+- actor_id: uuid (FK -> user_profiles.id)        -- Người gây ra notification
+- type: text  -- 'friend_request' | 'friend_accepted' | 'reaction' | 'comment' | 'new_location'
+- entity_id: uuid                                 -- ID folder hoặc friendship liên quan
+- is_read: boolean DEFAULT false
+- created_at: timestamp
+
+---
+
+## 5. CẤU TRÚC THƯ MỤC DỰ ÁN
+
+geosnap/
+├── app/                          # Next.js App Router
+│   ├── (auth)/
+│   │   ├── login/page.tsx        # Đăng nhập: Email, Google, Facebook
+│   │   └── register/page.tsx
+│   ├── (dashboard)/
+│   │   ├── layout.tsx
+│   │   ├── page.tsx              # Trang chủ, redirect về /timeline
+│   │   ├── timeline/page.tsx     # Chế độ xem theo thời gian
+│   │   ├── map/page.tsx          # Chế độ xem bản đồ
+│   │   ├── feed/page.tsx         # [MỚI] Social feed bạn bè
+│   │   ├── friends/page.tsx      # [MỚI] Danh sách bạn bè + pending requests
+│   │   ├── notifications/page.tsx # [MỚI] Trang thông báo
+│   │   ├── explore/page.tsx      # [MỚI] Khám phá địa điểm cộng đồng
+│   │   ├── upload/page.tsx       # Trang upload ảnh
+│   │   ├── folder/[id]/page.tsx  # Chi tiết một folder địa điểm
+│   │   └── settings/page.tsx     # [MỚI] Cài đặt tài khoản, privacy
+│   ├── profile/
+│   │   └── [username]/page.tsx   # [MỚI] Profile công khai của user
+│   ├── invite/
+│   │   └── [code]/page.tsx       # [MỚI] Trang mời kết bạn qua link
+│   └── api/
+│       ├── photos/
+│       │   ├── upload/route.ts   # POST: upload ảnh, xử lý EXIF
+│       │   └── [id]/route.ts     # GET/DELETE: thao tác với ảnh
+│       ├── folders/
+│       │   ├── route.ts          # GET: danh sách folders
+│       │   └── [id]/route.ts     # GET/PATCH/DELETE: thao tác folder
+│       ├── geocode/
+│       │   └── route.ts          # POST: reverse geocoding
+│       ├── friends/
+│       │   ├── route.ts          # GET: danh sách bạn bè
+│       │   ├── request/route.ts  # POST: gửi friend request
+│       │   └── [id]/route.ts     # PATCH: chấp nhận/từ chối
+│       ├── invite/
+│       │   └── [code]/route.ts   # GET: preview profile qua invite code
+│       ├── reactions/route.ts    # POST/DELETE: thêm/xóa reaction
+│       ├── comments/route.ts     # GET/POST: comments
+│       └── notifications/route.ts # GET/PATCH: notifications
+├── components/
+│   ├── upload/
+│   │   ├── DropZone.tsx
+│   │   ├── UploadProgress.tsx
+│   │   └── ManualLocationPicker.tsx
+│   ├── timeline/
+│   │   ├── TimelineView.tsx
+│   │   ├── MonthGroup.tsx
+│   │   └── FolderCard.tsx
+│   ├── map/
+│   │   ├── MapView.tsx
+│   │   ├── ClusterMarker.tsx
+│   │   └── FolderPopup.tsx
+│   ├── folder/
+│   │   ├── FolderGrid.tsx
+│   │   ├── PhotoGrid.tsx
+│   │   └── PhotoLightbox.tsx
+│   ├── social/                   # [MỚI] Social components
+│   │   ├── FeedItem.tsx          # Một item trong social feed
+│   │   ├── FriendCard.tsx        # Card hiển thị bạn bè
+│   │   ├── ReactionBar.tsx       # Thanh reaction emoji
+│   │   ├── CommentSection.tsx    # Phần comment
+│   │   ├── NotificationItem.tsx  # Item notification
+│   │   └── InviteLinkCard.tsx    # Card copy invite link
+│   └── ui/                       # Shared UI components
+│       ├── Button.tsx
+│       ├── Modal.tsx
+│       ├── LoadingSpinner.tsx
+│       ├── Avatar.tsx            # [MỚI] Avatar component
+│       └── Badge.tsx             # [MỚI] Huy hiệu explorer
+├── lib/
+│   ├── supabase.ts               # Supabase client
+│   ├── cloudinary.ts             # Cloudinary config
+│   ├── exif.ts                   # EXIF parsing logic
+│   ├── geocoding.ts              # Nominatim API calls
+│   ├── clustering.ts             # DBSCAN clustering algorithm
+│   ├── invite.ts                 # [MỚI] Invite link generation (nanoid)
+│   └── utils.ts                  # Helper functions
+├── hooks/
+│   ├── useFolders.ts
+│   ├── usePhotos.ts
+│   ├── useUpload.ts
+│   ├── useFriends.ts             # [MỚI]
+│   ├── useNotifications.ts       # [MỚI] Realtime notifications
+│   └── useFeed.ts                # [MỚI] Social feed
+├── types/
+│   └── index.ts                  # TypeScript type definitions
+├── middleware.ts                  # Auth middleware
+├── .env.local                    # Environment variables
+└── package.json
+
+---
+
+## 6. LOGIC NGHIỆP VỤ QUAN TRỌNG
+
+### 6.1 Đọc EXIF GPS
+Khi nhận được file ảnh từ client, dùng thư viện exifr để đọc:
+- GPS.GPSLatitude và GPS.GPSLongitude -> tọa độ
+- GPS.GPSLatitudeRef (N/S) và GPS.GPSLongitudeRef (E/W)
+- DateTimeOriginal -> thời gian chụp thực tế
+- Nếu không có GPS tag -> đánh dấu has_gps = false, yêu cầu gắn thủ công
+
+### 6.2 Thuật toán Clustering (DBSCAN đơn giản)
+Mục tiêu: gom các ảnh chụp trong cùng một địa điểm vào cùng folder
+Tham số:
+- epsilon (bán kính): 0.002 độ (~200 mét ở xích đạo)
+- minPoints: 1 (mỗi ảnh đơn lẻ cũng tạo folder riêng)
+
+Logic:
+1. Khi upload ảnh mới, lấy tất cả folders hiện có của user
+2. Tính khoảng cách Haversine từ ảnh mới đến center của từng folder
+3. Nếu khoảng cách <= 200m -> gán ảnh vào folder đó, cập nhật center
+4. Nếu không tìm được folder phù hợp -> tạo folder mới, gọi reverse geocoding để đặt tên
+
+### 6.3 Cập nhật Center của Folder
+Khi thêm ảnh mới vào folder, tính lại center bằng trung bình cộng tất cả tọa độ ảnh trong folder:
+new_center_lat = (sum of all photo latitudes) / photo_count
+new_center_lng = (sum of all photo longitudes) / photo_count
+
+### 6.4 Reverse Geocoding
+Gọi Nominatim API:
+GET https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json
+Kết quả trả về JSON, lấy các trường:
+- address.road -> tên đường
+- address.suburb hoặc address.district -> quận/huyện
+- address.city -> thành phố
+- address.country -> quốc gia
+Ghép lại để tạo tên folder: "{road}, {district}, {city}"
+Cache kết quả trong database để không gọi API lại cho cùng tọa độ
+
+### 6.5 Invite Link System
+- Khi user đăng ký (dù qua bất kỳ phương thức nào), generate invite_code bằng nanoid(8)
+- Đảm bảo unique bằng cách retry nếu trùng
+- Link có dạng: https://geosnap.app/invite/{invite_code}
+- Trang /invite/[code]:
+  + Hiển thị avatar, tên, số địa điểm đã đến của người mời
+  + Nút "Kết bạn với [Tên]"
+  + Nếu chưa login -> redirect đến trang đăng nhập, sau đó quay lại
+  + Sau khi login -> tự động tạo friendship với status 'pending'
+  + Gửi notification cho người mời
+- Người mời chấp nhận qua trang /friends
+
+### 6.6 Facebook OAuth Flow
+- Cấu hình trong Supabase Dashboard: Authentication -> Providers -> Facebook
+- Cần điền: Client ID và Client Secret từ Facebook Developer App
+- Permissions cần: email, public_profile
+- Callback URL: https://[project].supabase.co/auth/v1/callback
+- Sau khi login thành công:
+  + Supabase tự tạo record trong auth.users
+  + Trigger PostgreSQL tự tạo record trong user_profiles
+  + Lưu thêm facebook_id nếu cần
+  + Avatar lấy từ: https://graph.facebook.com/{facebook_id}/picture?type=large
+
+### 6.7 Privacy & Social Feed
+- Mỗi folder có visibility: 'private' | 'friends' | 'public'
+- Khi query social feed của user X:
+  + Lấy danh sách bạn bè của X
+  + Query location_folders WHERE user_id IN (friends) AND visibility IN ('friends', 'public')
+  + Sắp xếp theo created_at DESC
+  + Không bao giờ trả về folder 'private' của người khác
+
+### 6.8 Notification Realtime
+- Dùng Supabase Realtime để subscribe bảng notifications
+- Client-side: supabase.channel('notifications').on('postgres_changes', ...).subscribe()
+- Hiển thị badge số lượng chưa đọc trên icon notification trong navbar
+
+---
+
+## 7. API ENDPOINTS
+
+### Upload ảnh
+POST /api/photos/upload
+- Body: FormData với các file ảnh
+- Xử lý: parse EXIF, upload Cloudinary, clustering, lưu DB
+- Response: { photos: [], folders_affected: [] }
+
+### Lấy danh sách folders (Timeline)
+GET /api/folders?sort=time&page=1&limit=20
+- sort=time: sắp xếp theo last_visited_at DESC
+- sort=area: sắp xếp theo khu vực (group by city)
+- Response: { folders: [], total: number, page: number }
+
+### Lấy folders theo vùng bản đồ
+GET /api/folders?bbox={minLng},{minLat},{maxLng},{maxLat}
+- Dùng PostGIS ST_Within để query
+- Response: { folders: [] } (chỉ trả folders nằm trong viewport)
+
+### Lấy ảnh trong folder
+GET /api/folders/{id}/photos?page=1&limit=50
+- Response: { photos: [], total: number }
+
+### Cập nhật địa điểm thủ công
+PATCH /api/photos/{id}
+- Body: { latitude: number, longitude: number }
+- Xử lý: re-clustering, cập nhật folder
+- Response: { photo: {}, folder: {} }
+
+### Lấy profile qua invite code [MỚI]
+GET /api/invite/{code}
+- Response: { user: { display_name, avatar_url, total_countries, total_cities, username } }
+- Dùng để hiển thị preview trên trang /invite/[code]
+
+### Gửi friend request [MỚI]
+POST /api/friends/request
+- Body: { addressee_id: string }
+- Tự động tạo notification cho addressee
+- Response: { friendship: {} }
+
+### Respond to friend request [MỚI]
+PATCH /api/friends/{id}
+- Body: { action: 'accept' | 'decline' | 'block' }
+- Nếu accept -> tạo notification cho requester
+- Response: { friendship: {} }
+
+### Lấy danh sách bạn bè [MỚI]
+GET /api/friends?status=accepted
+- status: 'accepted' | 'pending'
+- Response: { friends: [], pending: [] }
+
+### Social feed [MỚI]
+GET /api/feed?page=1&limit=20
+- Lấy folders mới nhất của bạn bè (visibility != 'private')
+- Response: { items: [], total: number }
+
+### Reactions [MỚI]
+POST /api/reactions
+- Body: { folder_id: string, emoji: string }
+DELETE /api/reactions
+- Body: { folder_id: string, emoji: string }
+
+### Comments [MỚI]
+GET /api/comments?folder_id={id}
+POST /api/comments
+- Body: { folder_id: string, content: string }
+
+### Notifications [MỚI]
+GET /api/notifications?page=1
+PATCH /api/notifications/read-all  -- Đánh dấu tất cả đã đọc
+
+---
+
+## 8. GIAO DIỆN NGƯỜI DÙNG
+
+### 8.1 Trang Đăng Nhập / Đăng Ký
+- Nút "Tiếp tục với Facebook" (màu xanh đặc trưng Facebook)
+- Nút "Tiếp tục với Google"
+- Hoặc đăng nhập bằng email/password
+- Thiết kế tối giản, đẹp, mobile-first
+
+### 8.2 Trang Invite Link (/invite/[code])
+- Thiết kế "wow" để tạo ấn tượng với người mới
+- Hiển thị: Avatar lớn + tên người mời + bio
+- Stats nhỏ: "X địa điểm | Y quốc gia"
+- Nút CTA lớn: "Kết bạn với [Tên] trên GeoSnap"
+- Preview nhỏ: 3-4 ảnh địa điểm gần nhất của người mời (nếu public)
+- Footer: "GeoSnap - Ghi lại hành trình của bạn"
+
+### 8.3 Trang Friends (/friends)
+- Tab "Bạn bè" / Tab "Lời mời"
+- Phần "Chia sẻ link kết bạn của bạn" với nút copy
+- Danh sách bạn bè: avatar, tên, số địa điểm chung
+- Badge pending requests
+
+### 8.4 Trang Upload
+- Kéo thả ảnh (drag and drop) vào vùng upload
+- Hiển thị preview thumbnail từng ảnh đang xử lý
+- Progress bar cho từng ảnh: "Đang đọc GPS..." -> "Đang gom nhóm..." -> "Xong"
+- Với ảnh không có GPS: hiển thị mini map để người dùng chọn vị trí
+- Sau upload xong: thông báo tóm tắt "Đã thêm 12 ảnh vào 3 địa điểm"
+
+### 8.5 Timeline View
+- Layout dạng grid card, nhóm theo tháng/năm
+- Mỗi card folder hiển thị: ảnh bìa, tên địa điểm, số ảnh, ngày đến
+- Privacy badge trên card (🌍 Public / 👥 Friends / 🔒 Private)
+- Filter bar ở trên: chọn năm, chọn quốc gia
+- Infinite scroll hoặc phân trang
+- Click vào card -> vào trang chi tiết folder
+
+### 8.6 Map View
+- Bản đồ toàn màn hình
+- Toggle: "Của tôi" / "Bạn bè"
+- Cluster các marker khi zoom out (nhiều địa điểm gần nhau gom lại thành 1 số)
+- Click cluster -> zoom in
+- Click marker đơn -> popup hiển thị ảnh thumbnail và tên địa điểm
+- Click "Xem folder" trong popup -> vào trang chi tiết
+
+### 8.7 Social Feed (/feed)
+- Stream hành trình mới nhất của bạn bè
+- Mỗi item: avatar bạn bè + tên + "đã ghé [Tên Địa Điểm]" + thời gian
+- Hiển thị ảnh cover của folder
+- Thanh reaction emoji (❤️ 🔥 ✈️ 📍 😍)
+- Phần comment (show 2 comment mới nhất, "Xem thêm...")
+- Nút "Xem địa điểm"
+
+### 8.8 Trang Chi Tiết Folder
+- Header: tên địa điểm lớn, ngày đến lần đầu và lần cuối, số ảnh
+- Privacy selector: Public / Friends / Private
+- Reaction bar nếu là folder của bạn bè
+- Mini map nhỏ góc phải hiển thị vị trí
+- Grid ảnh responsive (3-4 cột desktop, 2 cột mobile)
+- Click ảnh -> lightbox xem ảnh to, swipe qua lại
+- Nút "Đổi tên folder" để chỉnh sửa tên tự động
+- Section Comment bên dưới
+
+### 8.9 Profile Page (/profile/[username])
+- Avatar lớn + tên + bio + stats (quốc gia, thành phố, ảnh)
+- Nút "Kết bạn" / "Đang là bạn" / "Đang chờ"
+- Grid địa điểm public
+- Huy hiệu explorer
+
+### 8.10 Notification Bell
+- Icon chuông trong navbar với badge số chưa đọc (realtime)
+- Dropdown hoặc trang riêng /notifications
+- Mỗi notification: avatar người gây ra + mô tả + thời gian + link đến entity
+
+---
+
+## 9. LỘ TRÌNH PHÁT TRIỂN
+
+### Phase 1: MVP Core (3-4 tuần)
+Tuần 1:
+- Dựng project Next.js, cài đặt Supabase, Cloudinary
+- Tạo schema database đầy đủ (bao gồm bảng xã hội)
+- Xây dựng auth: email, Google, Facebook OAuth
+- Tạo invite_code tự động khi đăng ký
+
+Tuần 2:
+- Tích hợp thư viện exifr để đọc GPS và thời gian từ EXIF
+- Tích hợp Nominatim API để reverse geocoding
+- Implement thuật toán clustering DBSCAN đơn giản
+- API endpoint POST /api/photos/upload hoàn chỉnh
+
+Tuần 3:
+- Trang Timeline View: hiển thị folders, nhóm theo tháng
+- API GET /api/folders với sort=time
+- Trang chi tiết folder: grid ảnh cơ bản
+- Xử lý ảnh không có GPS: form gắn thủ công
+
+Tuần 4:
+- Test end-to-end toàn bộ luồng upload -> xem
+- Fix bugs
+- Deploy lên Vercel + Supabase production
+- Viết README
+
+### Phase 2: Social Features (3-4 tuần) ⭐ QUAN TRỌNG
+Tuần 1:
+- Trang invite link /invite/[code] (thiết kế đẹp, ấn tượng)
+- API /api/invite/[code] (preview profile)
+- Trang /friends với invite link copy button
+
+Tuần 2:
+- Friend request system (gửi, chấp nhận, từ chối)
+- Notification system + Supabase Realtime
+- Notification bell trong navbar
+
+Tuần 3:
+- Privacy settings cho folder (public/friends/private)
+- Social feed /feed (folders mới của bạn bè)
+- Reaction system (❤️ 🔥 ✈️...)
+
+Tuần 4:
+- Comment system
+- Profile page /profile/[username]
+- Settings page (bio, avatar, privacy default)
+
+### Phase 3: Map + Discovery (2-3 tuần)
+- Tích hợp Mapbox GL JS vào Map View
+- Hiển thị cluster marker trên bản đồ
+- API GET /api/folders?bbox=... với PostGIS
+- Popup chi tiết khi click marker
+- Friends Map toggle
+- Explore page (public folders từ cộng đồng)
+- Search địa điểm theo tên
+
+### Phase 4: Polish + Gamification (2 tuần)
+- Lightbox xem ảnh to trong trang folder detail
+- Explorer Stats (quốc gia, thành phố, km ước tính)
+- Huy hiệu thành tích
+- Tối ưu performance: lazy loading ảnh, skeleton loading
+- Responsive design hoàn chỉnh cho mobile
+- Export hành trình dạng PDF
+- Dark mode
+
+---
+
+## 10. BIẾN MÔI TRƯỜNG CẦN CÀI ĐẶT
+
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# Mapbox
+NEXT_PUBLIC_MAPBOX_TOKEN=
+
+# Cloudinary
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+
+# Facebook OAuth (điền sau khi tạo Facebook App)
+NEXT_PUBLIC_FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
+
+# App
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+---
+
+## 11. CÁC THƯ VIỆN NPM CẦN CÀI
+
+dependencies:
+- next (framework)
+- react, react-dom
+- @supabase/supabase-js (database + auth)
+- @supabase/ssr (server-side supabase cho Next.js)
+- cloudinary (upload + management)
+- exifr (đọc EXIF metadata từ ảnh)
+- mapbox-gl (bản đồ interactive)
+- react-map-gl (React wrapper cho Mapbox)
+- react-dropzone (UI kéo thả file upload)
+- yet-another-react-lightbox (lightbox xem ảnh)
+- date-fns (xử lý ngày tháng)
+- zustand (state management)
+- tailwindcss
+- nanoid (generate invite codes ngắn, unique)
+- browser-image-compression (resize ảnh phía client trước upload)
+
+devDependencies:
+- typescript
+- @types/react
+- @types/node
+- eslint
+
+---
+
+## 12. LƯU Ý KỸ THUẬT QUAN TRỌNG
+
+1. Ảnh EXIF GPS: Hầu hết ảnh chụp bằng điện thoại đều có GPS. Ảnh chụp bằng máy ảnh DSLR thường không có. Cần xử lý cả hai trường hợp.
+
+2. Rate limit Nominatim: Giới hạn 1 request/giây và cần khai báo User-Agent hợp lệ. Luôn cache kết quả geocoding vào database ngay sau lần gọi đầu tiên.
+
+3. File size: Nên resize ảnh phía client trước khi upload để giảm băng thông. Dùng thư viện browser-image-compression trước khi gửi lên server.
+
+4. PostGIS: Cần enable extension trong Supabase bằng câu lệnh: CREATE EXTENSION IF NOT EXISTS postgis; Chạy trong Supabase SQL Editor.
+
+5. Supabase Row Level Security (RLS): Bật RLS cho tất cả bảng. Viết policy để user chỉ đọc/ghi được data của mình: USING (auth.uid() = user_id). Cho phép đọc folders public của người khác.
+
+6. Cloudinary upload: Upload trực tiếp từ server (signed upload) thay vì từ client để bảo mật API key.
+
+7. Clustering radius: 200m là phù hợp cho địa điểm trong thành phố. Có thể thêm setting cho phép user tùy chỉnh bán kính này.
+
+8. Facebook Developer App: Trong giai đoạn development, chỉ test được với tài khoản đã thêm vào danh sách Testers trong Facebook Developer Dashboard. Cần submit App Review để mở cho toàn bộ người dùng.
+
+9. Invite code: Dùng nanoid(8) để generate code 8 ký tự (ví dụ: "aB3xK9mQ"). Kiểm tra unique trong database. Trường hợp trùng (cực hiếm) thì generate lại.
+
+10. Supabase Realtime cho notifications: Dùng postgres_changes event trên bảng notifications, filter theo recipient_id = auth.uid(). Hiển thị badge realtime trên navbar.
+
+11. Privacy trong social feed: Luôn JOIN friendships khi query feed. Không bao giờ trả về folder visibility='private' của người khác dù trong bất kỳ API nào. Đây là yêu cầu bảo mật tối quan trọng.
+
+12. Profile username: Unique, lowercase, alphanumeric và dấu gạch dưới, 3-20 ký tự. Sinh tự động từ display_name hoặc Facebook name khi đăng ký, cho phép chỉnh sau.
+
+---
+
+## 13. SETUP FACEBOOK OAUTH (HƯỚNG DẪN TỪNG BƯỚC)
+
+Bước 1: Vào https://developers.facebook.com -> My Apps -> Create App
+Bước 2: Chọn loại app: "Consumer" hoặc "Business"
+Bước 3: Thêm sản phẩm "Facebook Login"
+Bước 4: Trong Valid OAuth Redirect URIs, thêm: https://[project-ref].supabase.co/auth/v1/callback
+Bước 5: Lấy App ID và App Secret -> điền vào Supabase Dashboard
+Bước 6: Trong Supabase Dashboard -> Authentication -> Providers -> Facebook -> Enable
+Bước 7: Điền Client ID (App ID) và Client Secret (App Secret)
+Bước 8: Trong code, gọi: supabase.auth.signInWithOAuth({ provider: 'facebook' })
+Bước 9: Test với tài khoản Tester trước khi submit App Review
+
+---
+
+## 14. ĐỊNH NGHĨA "DONE" CHO TỪNG GIAI ĐOẠN
+
+Phase 1 hoàn thành khi:
+- Đăng ký/đăng nhập hoạt động (email + Google + Facebook)
+- Upload được ảnh có GPS, tự động tạo folder đúng địa điểm
+- Upload được ảnh không GPS, gắn thủ công được
+- Xem danh sách folder theo thời gian
+- Xem ảnh trong từng folder
+- Deploy lên production chạy được
+
+Phase 2 hoàn thành khi:
+- Invite link /invite/[code] hoạt động và đẹp
+- Gửi/chấp nhận friend request hoạt động
+- Notification realtime khi có lời mời kết bạn
+- Social feed hiển thị địa điểm mới của bạn bè
+- Privacy settings (public/friends/private) hoạt động đúng
+
+Phase 3 hoàn thành khi:
+- Bản đồ hiển thị đúng vị trí các folder
+- Cluster marker hoạt động khi zoom
+- Click marker xem được folder
+- Tìm kiếm theo tên địa điểm
+- Friends Map toggle hoạt động
+
+Phase 4 hoàn thành khi:
+- Chạy mượt trên mobile
+- Load ảnh nhanh (dưới 2 giây)
+- Không có lỗi UI rõ ràng
+- Explorer stats và huy hiệu hiển thị đúng

@@ -1,0 +1,28 @@
+# 📥 **Download google-services.json - Step by Step**
+
+## **Cách làm (2 phút):**
+
+1. **Mở Firebase Console:**
+   ```
+   https://console.firebase.google.com/project/geosnap-4dd7a/settings/general
+   ```
+
+2. **Scroll xuống → Tìm "Android apps"**
+
+3. **Nếu chưa có Android app:**
+   - Click "Add app"
+   - Chọn "Android"
+   - Package name: `com.geosnap.app`
+   - SHA-1 (optional, skip)
+   - Click "Register app"
+
+4. **Click vào Android app → "google-services.json"**
+
+5. **Download file**
+
+6. **Copy nội dung file đó → paste vào chat/save somewhere**
+
+---
+
+**Paste google-services.json content tại đây:**
+(Nói lên khi ready!)

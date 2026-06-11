@@ -1,0 +1,28 @@
+{
+  "name": "GeoSnap - Mạng Xã Hội Địa Điểm",
+  "short_name": "GeoSnap",
+  "description": "Lưu giữ hành trình bằng hình ảnh geotagged, kết nối với bạn bè",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#08090a",
+  "theme_color": "#ff6b35",
+  "lang": "vi",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["social", "photo", "travel"],
+  "screenshots": []
+}

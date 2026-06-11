@@ -1,0 +1,56 @@
+{
+  "packageId": "com.geosnap.app",
+  "host": "geosnap-4dd7a.web.app",
+  "name": "GeoSnap",
+  "launcherName": "GeoSnap",
+  "display": "standalone",
+  "themeColor": "#6C63FF",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#0F0F14",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://geosnap-4dd7a.web.app/icons/icon-512.png",
+  "maskableIconUrl": "https://geosnap-4dd7a.web.app/icons/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "/home/huunhan/GEOSNAP/GEO/android-twa/android.keystore",
+    "alias": "android"
+  },
+  "appVersionName": "3",
+  "appVersionCode": 3,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://geosnap-4dd7a.web.app/manifest.json",
+  "fallbackType": "webview",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://geosnap-4dd7a.web.app/",
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "fingerprints": [
+    {
+      "name": "release",
+      "value": "D9:50:82:A9:9C:B5:3B:A9:0E:3E:95:25:43:B7:E2:AB:B4:45:61:B2:5D:17:8D:44:F4:E7:13:55:E5:22:E6:04"
+    }
+  ],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "3"
+}
