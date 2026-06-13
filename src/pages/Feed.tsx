@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { collection, query, where, getDocs, limit, getDoc, doc, addDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { LocationFolder, UserProfile, Post, FeedItem } from '../types';
 import { Link } from 'react-router-dom';
@@ -9,40 +8,6 @@ import { StoriesBar } from '../components/Stories/StoriesBar';
 import { PostItem } from '../components/feed/PostItem';
 import { useToast } from '../components/ToastContainer';
 import { Loader2 } from 'lucide-react';
-
-/**
- * Compress & resize an image file into a base64 string small enough
- * to fit inside a Firestore document (< 1 MB limit).
- * maxDim: max width or height in pixels
- * quality: JPEG quality 0–1
- */
-function compressImageToBase64(file: File, maxDim: number, quality: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let w = img.width;
-        let h = img.height;
-        const ratio = Math.min(maxDim / w, maxDim / h, 1);
-        w = Math.round(w * ratio);
-        h = Math.round(h * ratio);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject(new Error('Canvas context unavailable'));
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = reject;
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 export default function Feed() {
   const { user } = useAppStore();
@@ -60,120 +25,74 @@ export default function Feed() {
     setDisplayLimit(10);
 
     try {
-      console.log('Fetching feed for user:', user.uid);
-
-      const [sentSnap, receivedSnap] = await Promise.all([
-        getDocs(query(collection(db, 'friendships'), where('requesterId', '==', user.uid), where('status', '==', 'accepted'))),
-        getDocs(query(collection(db, 'friendships'), where('addresseeId', '==', user.uid), where('status', '==', 'accepted')))
+      // Parallel fetch posts feed, friends' folders and active stories
+      const [feedRes, foldersRes, storiesRes] = await Promise.all([
+        api.get<{ posts: any[] }>('/api/v1/posts/feed?limit=100'),
+        api.get<{ folders: any[] }>('/api/v1/folders/friends'),
+        api.get<{ stories: any[] }>('/api/v1/posts/stories')
       ]);
 
-      const friendIds = [
-        ...sentSnap.docs.map(d => d.data().addresseeId),
-        ...receivedSnap.docs.map(d => d.data().requesterId),
-        user.uid // Include own posts
-      ];
+      // Map posts to FeedItems and enrich userProfile
+      const mappedPosts: FeedItem[] = feedRes.posts.map(p => {
+        const userProfile: UserProfile = p.user ? {
+          uid: p.user.uid,
+          displayName: p.user.displayName,
+          avatarUrl: p.user.avatarUrl,
+          email: '',
+          role: 'user',
+          createdAt: ''
+        } : { uid: p.uid, email: '', role: 'user', createdAt: '' };
 
-      console.log('Feed friend IDs:', friendIds.length);
+        return {
+          id: p.id,
+          type: 'post' as const,
+          data: { ...p, userProfile } as Post,
+          createdAt: p.createdAt
+        };
+      });
 
-      let rawFolders: LocationFolder[] = [];
-      let rawPosts: Post[] = [];
+      // Map folders to FeedItems and enrich userProfile
+      const mappedFolders: FeedItem[] = foldersRes.folders.map(f => {
+        const userProfile: UserProfile = f.user ? {
+          uid: f.user.id,
+          displayName: f.user.displayName,
+          avatarUrl: f.user.avatarUrl,
+          email: '',
+          role: 'user',
+          createdAt: ''
+        } : { uid: f.uid, email: '', role: 'user', createdAt: '' };
 
-      for (let i = 0; i < friendIds.length; i += 10) {
-        const chunk = friendIds.slice(i, i + 10);
+        return {
+          id: f.id,
+          type: 'folder' as const,
+          data: { ...f, userProfile } as LocationFolder & { userProfile: UserProfile },
+          createdAt: f.createdAt
+        };
+      });
 
-        try {
-          // Folders
-          const fSnap = await getDocs(query(
-            collection(db, 'folders'),
-            where('uid', 'in', chunk),
-            limit(30)
-          ));
-          rawFolders = [
-            ...rawFolders,
-            ...fSnap.docs
-              .map(d => {
-                try {
-                  return { id: d.id, ...d.data() } as LocationFolder;
-                } catch (e) {
-                  console.error('Error parsing folder:', d.id, e);
-                  return null;
-                }
-              })
-              .filter((f): f is LocationFolder => f !== null)
-              .filter(f => f.visibility === 'friends' || f.visibility === 'public')
-          ];
-
-          // Posts
-          const pSnap = await getDocs(query(
-            collection(db, 'posts'),
-            where('uid', 'in', chunk),
-            limit(50)
-          ));
-          rawPosts = [
-            ...rawPosts,
-            ...pSnap.docs
-              .map(d => {
-                try {
-                  return { id: d.id, ...d.data() } as Post;
-                } catch (e) {
-                  console.error('Error parsing post:', d.id, e);
-                  return null;
-                }
-              })
-              .filter((p): p is Post => p !== null)
-              .filter(p => p.visibility === 'friends' || p.visibility === 'public')
-          ];
-        } catch (chunkError: any) {
-          console.error('Error fetching chunk:', chunkError?.code, chunkError?.message);
-        }
-      }
-
-      console.log('Feed items - Folders:', rawFolders.length, 'Posts:', rawPosts.length);
-
-      // Process Stories
-      const now = new Date().getTime();
-      const validStories = rawPosts.filter(p => p.type === 'story' && p.expiresAt && new Date(p.expiresAt).getTime() > now);
-      const regularPosts = rawPosts.filter(p => p.type === 'post');
-
-      // Combine and Sort Feed Items
-      let combined: FeedItem[] = [
-        ...rawFolders.map(f => ({ id: f.id!, type: 'folder' as const, data: f, createdAt: f.createdAt })),
-        ...regularPosts.map(p => ({ id: p.id!, type: 'post' as const, data: p, createdAt: p.createdAt }))
-      ];
-
+      // Combine and sort
+      const combined = [...mappedPosts, ...mappedFolders];
       combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-      // Enrich with user profiles
-      const profileCache: Record<string, UserProfile> = {};
-      const loadProfile = async (uid: string) => {
-        if (!profileCache[uid]) {
-          try {
-            const snap = await getDoc(doc(db, 'users', uid));
-            profileCache[uid] = snap.exists() ? { uid: snap.id, ...snap.data() } as UserProfile : { uid, email: '' } as UserProfile;
-          } catch (e) {
-            console.error('Error loading profile for uid:', uid, e);
-            profileCache[uid] = { uid, email: '' } as UserProfile;
-          }
-        }
-        return profileCache[uid];
-      };
+      // Enrich stories
+      const enrichedStories = storiesRes.stories.map(s => {
+        const userProfile: UserProfile = s.user ? {
+          uid: s.user.uid,
+          displayName: s.user.displayName,
+          avatarUrl: s.user.avatarUrl,
+          email: '',
+          role: 'user',
+          createdAt: ''
+        } : { uid: s.uid, email: '', role: 'user', createdAt: '' };
 
-      const enrichedFeed = await Promise.all(combined.map(async (item) => ({
-        ...item,
-        data: { ...item.data, userProfile: await loadProfile(item.data.uid) }
-      })));
+        return { ...s, userProfile } as Post & { userProfile: UserProfile };
+      });
 
-      const enrichedStories = await Promise.all(validStories.map(async (story) => ({
-        ...story,
-        userProfile: await loadProfile(story.uid)
-      })));
-
-      setFeed(enrichedFeed);
+      setFeed(combined);
       setStories(enrichedStories);
-
     } catch (e: any) {
-      console.error('Error fetching feed:', e?.code, e?.message, e);
-      toast('Bảng tin lỗi: ' + (e?.message ?? e?.code ?? 'lỗi không xác định'), 'error');
+      console.error('Error fetching feed:', e);
+      toast('Không thể tải bảng tin: ' + (e?.message || 'Lỗi kết nối'), 'error');
     } finally {
       setLoading(false);
     }
@@ -183,13 +102,12 @@ export default function Feed() {
     fetchFeed();
   }, [fetchFeed]);
 
-  // Infinite scroll observer for in-memory pagination
+  // Infinite scroll observer for pagination
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && displayLimit < feed.length && !loadingMore) {
           setLoadingMore(true);
-          // Small delay for smooth scroll animation effect
           setTimeout(() => {
             setDisplayLimit(prev => Math.min(prev + 10, feed.length));
             setLoadingMore(false);
@@ -207,26 +125,26 @@ export default function Feed() {
   const handleCreatePost = async (content: string, files: File[]) => {
     if (!user) return;
     try {
+      // Upload images to R2 storage
       const urls = await Promise.all(
-        files.map((file) => compressImageToBase64(file, 450, 0.5))
+        files.map(async (file) => {
+          const res = await api.uploadPhoto(file);
+          return res.url;
+        })
       );
 
-      await addDoc(collection(db, 'posts'), {
-        uid: user.uid,
+      // Create post record
+      await api.post('/api/v1/posts', {
         type: 'post',
         content: content.trim(),
         imageUrls: urls,
-        reactions: {},
-        commentCount: 0,
-        shareCount: 0,
-        visibility: 'friends',
-        createdAt: new Date().toISOString()
+        visibility: 'friends'
       });
 
       toast('Bài viết đã được đăng thành công!', 'success');
       fetchFeed();
     } catch (e: any) {
-      console.error('handleCreatePost error:', e?.code, e?.message, e);
+      console.error('handleCreatePost error:', e);
       toast('Lỗi khi đăng bài: ' + (e?.message || 'Vui lòng thử lại.'), 'error');
       throw e;
     }
@@ -235,27 +153,21 @@ export default function Feed() {
   const handleCreateStory = async (file: File) => {
     if (!user) return;
     try {
-      const url = await compressImageToBase64(file, 720, 0.65);
+      const res = await api.uploadPhoto(file);
 
       const expires = new Date();
       expires.setHours(expires.getHours() + 24);
 
-      await addDoc(collection(db, 'posts'), {
-        uid: user.uid,
+      await api.post('/api/v1/posts', {
         type: 'story',
-        content: '',
-        imageUrls: [url],
-        reactions: {},
-        commentCount: 0,
-        shareCount: 0,
-        visibility: 'friends',
+        imageUrls: [res.url],
         expiresAt: expires.toISOString(),
-        createdAt: new Date().toISOString()
+        visibility: 'friends'
       });
       toast('Tin đã được tạo thành công!', 'success');
       fetchFeed();
     } catch (e: any) {
-      console.error('handleCreateStory error:', e?.code, e?.message, e);
+      console.error('handleCreateStory error:', e);
       toast('Không thể tạo tin: ' + (e?.message || 'Vui lòng thử lại.'), 'error');
     }
   };
@@ -270,19 +182,30 @@ export default function Feed() {
     const currentReactions = data.reactions || {};
     const newReactions = { ...currentReactions };
     
-    if (newReactions[user.uid] === emoji) {
-        delete newReactions[user.uid];
-    } else {
-        newReactions[user.uid] = emoji;
-    }
-
+    const hasReacted = currentReactions[user.uid] === emoji;
+    
     try {
-      const col = itemType === 'post' ? 'posts' : 'folders';
-      await updateDoc(doc(db, col, itemId), { reactions: newReactions });
-      
-      const newFeed = [...feed];
-      newFeed[itemIdx] = { ...item, data: { ...data, reactions: newReactions } };
-      setFeed(newFeed);
+      if (itemType === 'post') {
+        // Post reaction API
+        const reactionEmoji = hasReacted ? null : emoji;
+        const res = await api.put<{ reactions: any }>(`/api/v1/posts/${itemId}/react`, { emoji: reactionEmoji });
+        
+        const newFeed = [...feed];
+        newFeed[itemIdx] = { ...item, data: { ...data, reactions: res.reactions } };
+        setFeed(newFeed);
+      } else {
+        // Folder reaction API
+        if (hasReacted) {
+          delete newReactions[user.uid];
+        } else {
+          newReactions[user.uid] = emoji;
+        }
+        await api.put(`/api/v1/folders/${itemId}`, { reactions: newReactions });
+        
+        const newFeed = [...feed];
+        newFeed[itemIdx] = { ...item, data: { ...data, reactions: newReactions } };
+        setFeed(newFeed);
+      }
     } catch (e) {
       console.error(e);
     }

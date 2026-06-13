@@ -1,21 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { db } from '../firebase';
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-  QueryDocumentSnapshot,
-  DocumentData,
-} from 'firebase/firestore';
+import { api } from '../lib/api';
 import { Search, TrendingUp, MapPin, Globe, Camera, Compass } from 'lucide-react';
 import { LazyImagePlaceholder } from '../components/LazyImage';
 import type { LocationFolder, UserProfile, Photo } from '../types';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type FilterTab = 'all' | 'popular' | 'recent';
 
@@ -29,25 +17,15 @@ interface PublicPhoto extends Photo {
   folderName?: string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function mapFolder(doc: QueryDocumentSnapshot<DocumentData>): FolderWithOwner {
-  return { id: doc.id, ...(doc.data() as Omit<LocationFolder, 'id'>) };
-}
-
-function mapPhoto(doc: QueryDocumentSnapshot<DocumentData>): PublicPhoto {
-  return { id: doc.id, ...(doc.data() as Omit<Photo, 'id'>) };
-}
-
 // ─── Skeleton Components ──────────────────────────────────────────────────────
 
 function FolderCardSkeleton() {
   return (
-    <div className="rounded-2xl overflow-hidden bg-bg-card border border-border-dim stagger-item">
-      <div className="h-48 skeleton" />
+    <div className="rounded-2xl overflow-hidden bg-bg-card border border-border-dim stagger-item animate-pulse">
+      <div className="h-48 bg-surface" />
       <div className="p-4 space-y-2">
-        <div className="h-4 skeleton rounded-lg w-3/4" />
-        <div className="h-3 skeleton rounded-lg w-1/2" />
+        <div className="h-4 bg-surface rounded-lg w-3/4" />
+        <div className="h-3 bg-surface rounded-lg w-1/2" />
       </div>
     </div>
   );
@@ -55,7 +33,7 @@ function FolderCardSkeleton() {
 
 function PhotoGridSkeleton() {
   return (
-    <div className="aspect-square rounded-xl skeleton" />
+    <div className="aspect-square rounded-xl bg-surface animate-pulse" />
   );
 }
 
@@ -70,7 +48,6 @@ function FolderCard({ folder }: { folder: FolderWithOwner }) {
       to={`/folder/${folder.id}`}
       className="group block rounded-2xl overflow-hidden bg-bg-card border border-border-dim card-hover-lift stagger-item"
     >
-      {/* Cover photo */}
       <div className="relative h-48 overflow-hidden bg-surface">
         {folder.coverPhotoUrl ? (
           <LazyImagePlaceholder
@@ -84,16 +61,13 @@ function FolderCard({ folder }: { folder: FolderWithOwner }) {
           </div>
         )}
 
-        {/* Gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
 
-        {/* Photo count badge */}
         <div className="absolute top-3 right-3 flex items-center gap-1 bg-black/50 backdrop-blur-sm text-white text-xs font-semibold px-2.5 py-1 rounded-full">
           <Camera className="w-3 h-3" />
           {folder.photoCount}
         </div>
 
-        {/* Bottom info */}
         <div className="absolute bottom-0 left-0 right-0 p-4">
           <h3 className="text-white font-bold text-[15px] leading-tight line-clamp-1 group-hover:text-brand transition-colors">
             {folder.name}
@@ -107,7 +81,6 @@ function FolderCard({ folder }: { folder: FolderWithOwner }) {
         </div>
       </div>
 
-      {/* Owner info */}
       <div className="p-3 flex items-center gap-2.5">
         {folder.ownerProfile?.avatarUrl ? (
           <img
@@ -156,64 +129,20 @@ export default function Explore() {
   const [loadingFolders, setLoadingFolders] = useState(true);
   const [loadingPhotos, setLoadingPhotos] = useState(true);
 
-  // ── Fetch public folders ────────────────────────────────────────────────────
+  // Fetch public folders
   const fetchFolders = useCallback(async (tab: FilterTab) => {
     setLoadingFolders(true);
     try {
-      let q;
-      if (tab === 'popular') {
-        q = query(
-          collection(db, 'folders'),
-          where('visibility', '==', 'public'),
-          orderBy('photoCount', 'desc'),
-          limit(12),
-        );
-      } else if (tab === 'recent') {
-        q = query(
-          collection(db, 'folders'),
-          where('visibility', '==', 'public'),
-          orderBy('createdAt', 'desc'),
-          limit(12),
-        );
-      } else {
-        q = query(
-          collection(db, 'folders'),
-          where('visibility', '==', 'public'),
-          orderBy('photoCount', 'desc'),
-          limit(12),
-        );
-      }
-
-      const snapshot = await getDocs(q);
-      const rawFolders = snapshot.docs.map(mapFolder);
-
-      // Fetch owner profiles
-      const ownerIds = [...new Set(rawFolders.map(f => f.uid))];
-      const ownerMap = new Map<string, Pick<UserProfile, 'displayName' | 'avatarUrl'>>();
-
-      await Promise.all(
-        ownerIds.map(async uid => {
-          try {
-            const { doc, getDoc } = await import('firebase/firestore');
-            const userSnap = await getDoc(doc(db, 'users', uid));
-            if (userSnap.exists()) {
-              const data = userSnap.data() as UserProfile;
-              ownerMap.set(uid, {
-                displayName: data.displayName,
-                avatarUrl: data.avatarUrl,
-              });
-            }
-          } catch {
-            // silently ignore individual profile fetch errors
-          }
-        }),
-      );
-
-      const enriched = rawFolders.map(f => ({
+      const order = tab === 'recent' ? 'createdAt' : 'photoCount';
+      const res = await api.get<{ folders: any[] }>(`/api/v1/explore/folders?limit=12&orderBy=${order}`);
+      
+      const enriched = res.folders.map(f => ({
         ...f,
-        ownerProfile: ownerMap.get(f.uid),
+        ownerProfile: f.user ? {
+          displayName: f.user.displayName,
+          avatarUrl: f.user.avatarUrl
+        } : undefined
       }));
-
       setFolders(enriched);
     } catch (err) {
       console.error('Failed to fetch public folders:', err);
@@ -223,42 +152,53 @@ export default function Explore() {
     }
   }, []);
 
-  // ── Fetch public photos ─────────────────────────────────────────────────────
+  // Fetch public photos
   const fetchPhotos = useCallback(async () => {
     setLoadingPhotos(true);
     try {
-      const q = query(
-        collection(db, 'photos'),
-        where('visibility', '==', 'public'),
-        orderBy('uploadedAt', 'desc'),
-        limit(24),
-      );
-      const snapshot = await getDocs(q);
-      setPhotos(snapshot.docs.map(mapPhoto));
-    } catch {
-      // photos collection may not have visibility field for all docs; silently handle
+      const res = await api.get<{ photos: any[] }>('/api/v1/explore/photos?limit=24');
+      setPhotos(res.photos);
+    } catch (err) {
+      console.error('Failed to fetch public photos:', err);
       setPhotos([]);
     } finally {
       setLoadingPhotos(false);
     }
   }, []);
 
+  // Debounced search query lookup
   useEffect(() => {
-    void fetchFolders(activeTab);
-  }, [activeTab, fetchFolders]);
+    if (!searchQuery.trim()) {
+      fetchFolders(activeTab);
+      return;
+    }
+    
+    const fetchSearched = async () => {
+      setLoadingFolders(true);
+      try {
+        const res = await api.get<{ folders: any[] }>(`/api/v1/explore/folders?limit=20&search=${encodeURIComponent(searchQuery)}`);
+        const enriched = res.folders.map(f => ({
+          ...f,
+          ownerProfile: f.user ? {
+            displayName: f.user.displayName,
+            avatarUrl: f.user.avatarUrl
+          } : undefined
+        }));
+        setFolders(enriched);
+      } catch (err) {
+        console.error('Failed to search public folders:', err);
+      } finally {
+        setLoadingFolders(false);
+      }
+    };
+
+    const timer = setTimeout(fetchSearched, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, activeTab, fetchFolders]);
 
   useEffect(() => {
-    void fetchPhotos();
+    fetchPhotos();
   }, [fetchPhotos]);
-
-  // ── Filtered folders by search ──────────────────────────────────────────────
-  const filteredFolders = searchQuery.trim()
-    ? folders.filter(f =>
-        f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        f.city?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        f.country?.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : folders;
 
   const tabs: { key: FilterTab; label: string }[] = [
     { key: 'all', label: 'Tất cả' },
@@ -268,27 +208,24 @@ export default function Explore() {
 
   return (
     <div className="min-h-full bg-bg-deep page-enter">
-      {/* ── Hero Header ─────────────────────────────────────────────────────── */}
       <div className="relative overflow-hidden px-4 pt-8 pb-6 md:px-8 md:pt-12 md:pb-8">
-        {/* Background glow */}
         <div className="absolute inset-0 -z-10 pointer-events-none">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-brand/8 rounded-full blur-3xl" />
         </div>
 
         <div className="max-w-3xl mx-auto text-center space-y-3">
-          <div className="flex items-center justify-center gap-2 text-brand text-sm font-semibold mb-1 stagger-item">
+          <div className="flex items-center justify-center gap-2 text-brand text-sm font-semibold mb-1">
             <Globe className="w-4 h-4" />
             Khám phá công khai
           </div>
-          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight gradient-text stagger-item">
+          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight gradient-text">
             Khám Phá Thế Giới
           </h1>
-          <p className="text-text-dim text-sm md:text-base stagger-item">
+          <p className="text-text-dim text-sm md:text-base">
             Tìm kiếm những địa điểm tuyệt vời được chia sẻ bởi cộng đồng GeoSnap
           </p>
 
-          {/* Search bar */}
-          <div className="relative mt-6 stagger-item">
+          <div className="relative mt-6">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-dim pointer-events-none" />
             <input
               type="text"
@@ -302,7 +239,6 @@ export default function Explore() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-8 pb-20 space-y-10">
-        {/* ── Trending Locations ──────────────────────────────────────────── */}
         <section>
           <div className="flex items-center gap-2.5 mb-5">
             <div className="w-8 h-8 rounded-xl bg-brand/15 border border-brand/25 flex items-center justify-center shrink-0">
@@ -313,7 +249,6 @@ export default function Explore() {
               <p className="text-text-dim text-xs">Được cộng đồng chia sẻ nhiều nhất</p>
             </div>
 
-            {/* Filter tabs */}
             <div className="ml-auto flex gap-1 bg-bg-card/60 backdrop-blur-sm border border-border-dim rounded-xl p-1">
               {tabs.map(tab => (
                 <button
@@ -337,9 +272,9 @@ export default function Explore() {
                 <FolderCardSkeleton key={i} />
               ))}
             </div>
-          ) : filteredFolders.length > 0 ? (
+          ) : folders.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredFolders.map((folder, idx) => (
+              {folders.map((folder, idx) => (
                 <div key={folder.id ?? idx}>
                   <FolderCard folder={folder} />
                 </div>
@@ -356,7 +291,6 @@ export default function Explore() {
           )}
         </section>
 
-        {/* ── Public Photo Grid ───────────────────────────────────────────── */}
         {!searchQuery && (
           <section>
             <div className="flex items-center gap-2.5 mb-5">

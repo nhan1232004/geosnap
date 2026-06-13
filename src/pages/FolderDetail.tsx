@@ -1,16 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  doc,
-  getDoc,
-  updateDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-  addDoc,
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { api } from '../lib/api';
 import { LocationFolder, Photo, Comment } from '../types';
 import {
   ArrowLeft,
@@ -87,40 +77,22 @@ export default function FolderDetail() {
 
     const fetchData = async () => {
       try {
-        const folderDoc = await getDoc(doc(db, 'folders', id));
-        if (folderDoc.exists()) {
-          const folderData = { id: folderDoc.id, ...folderDoc.data() } as LocationFolder;
-          setFolder(folderData);
-          setDescInput(folderData.description || '');
-        }
+        const folderData = await api.get<LocationFolder>(`/api/v1/folders/${id}`);
+        setFolder(folderData);
+        setDescInput(folderData.description || '');
 
-        // Fix: query by folderId only — do NOT filter by uid so visitors can see photos too
-        const q = query(collection(db, 'photos'), where('folderId', '==', id));
-        const photoSnaps = await getDocs(q);
-        const fetchedPhotos = photoSnaps.docs.map(
-          (d) => ({ id: d.id, ...d.data() } as Photo),
-        );
-
-        // Sort newest first
+        const photoData = await api.get<{ photos: Photo[] }>(`/api/v1/photos?folderId=${id}`);
+        const fetchedPhotos = photoData.photos;
         fetchedPhotos.sort((a, b) => {
           if (!a.takenAt || !b.takenAt) return 0;
           return new Date(b.takenAt).getTime() - new Date(a.takenAt).getTime();
         });
-
         setPhotos(fetchedPhotos);
 
-        // Fetch comments
-        const qComments = query(collection(db, 'comments'), where('folderId', '==', id));
-        const commentSnaps = await getDocs(qComments);
-        const fetchedComments = commentSnaps.docs.map(
-          (d) => ({ id: d.id, ...d.data() } as Comment),
-        );
-        fetchedComments.sort(
-          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-        );
-        setComments(fetchedComments);
+        const commentData = await api.get<{ comments: Comment[] }>(`/api/v1/comments?folderId=${id}`);
+        setComments(commentData.comments);
       } catch (err) {
-        handleFirestoreError(err, OperationType.GET, 'folders/photos');
+        console.error('Failed to fetch folder details:', err);
       } finally {
         setLoading(false);
       }
@@ -134,7 +106,7 @@ export default function FolderDetail() {
   const updateVisibility = async (vis: 'private' | 'friends' | 'public') => {
     if (!folder?.id) return;
     try {
-      await updateDoc(doc(db, 'folders', folder.id), { visibility: vis });
+      await api.put(`/api/v1/folders/${folder.id}`, { visibility: vis });
       setFolder({ ...folder, visibility: vis });
     } catch (e) {
       console.error('Failed to update visibility', e);
@@ -144,7 +116,7 @@ export default function FolderDetail() {
   const saveDescription = async () => {
     if (!folder?.id) return;
     try {
-      await updateDoc(doc(db, 'folders', folder.id), { description: descInput.trim() });
+      await api.put(`/api/v1/folders/${folder.id}`, { description: descInput.trim() });
       setFolder({ ...folder, description: descInput.trim() });
       setIsEditingDesc(false);
     } catch (e) {
@@ -162,7 +134,7 @@ export default function FolderDetail() {
       newReactions[user.uid] = emoji;
     }
     try {
-      await updateDoc(doc(db, 'folders', folder.id), { reactions: newReactions });
+      await api.put(`/api/v1/folders/${folder.id}`, { reactions: newReactions });
       setFolder({ ...folder, reactions: newReactions });
       setShowEmojiPicker(false);
     } catch (e) {
@@ -174,35 +146,22 @@ export default function FolderDetail() {
     e.preventDefault();
     if (!newComment.trim() || !folder || !user) return;
     try {
-      const commentData: Omit<Comment, 'id'> = {
-        uid: user.uid,
+      const createdComment = await api.post<Comment>('/api/v1/comments', {
         folderId: folder.id,
         content: newComment.trim(),
-        userProfile: {
-          uid: user.uid,
-          displayName: user.displayName ?? undefined,
-          avatarUrl: user.photoURL ?? undefined,
-          email: user.email ?? '',
-          role: 'user',
-          createdAt: new Date().toISOString(),
-        },
-        createdAt: new Date().toISOString(),
-      };
-      const docRef = await addDoc(collection(db, 'comments'), commentData);
-      setComments((prev) => [...prev, { id: docRef.id, ...commentData }]);
+      });
+      setComments((prev) => [...prev, createdComment]);
       setNewComment('');
     } catch (err) {
       console.error('Failed to post comment', err);
     }
   };
 
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen animate-[page-enter_0.4s_ease-out]">
         <HeroSkeleton />
         <div className="max-w-5xl mx-auto px-4 mt-8">
-          {/* Title skeleton */}
           <div className="space-y-3 mb-8">
             <div className="h-8 w-64 bg-surface rounded-xl animate-pulse" />
             <div className="h-4 w-40 bg-surface rounded-xl animate-pulse" />
@@ -230,7 +189,6 @@ export default function FolderDetail() {
   const vis = folder.visibility || 'private';
   const totalReactions = Object.keys(folder.reactions || {}).length;
 
-  // Dates
   const firstDate = folder.firstVisitedAt
     ? new Date(folder.firstVisitedAt).toLocaleDateString('vi-VN', {
         year: 'numeric',
@@ -270,7 +228,6 @@ export default function FolderDetail() {
 
         {/* Hero content */}
         <div className="absolute bottom-0 left-0 right-0 px-6 pb-10 md:px-12 md:pb-12">
-          {/* Location badge */}
           <div className="flex items-center gap-2 mb-4">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-brand/20 border border-brand/30 backdrop-blur-sm">
               <MapPin className="w-3.5 h-3.5 text-brand" />
@@ -286,12 +243,10 @@ export default function FolderDetail() {
             )}
           </div>
 
-          {/* Folder name */}
           <h1 className="text-[36px] md:text-[56px] font-extrabold tracking-tight text-white leading-tight mb-3 drop-shadow-2xl">
             {folder.name}
           </h1>
 
-          {/* Coords & stats row */}
           <div className="flex flex-wrap items-center gap-4 text-[13px]">
             <span className="flex items-center gap-1.5 text-white/50 font-mono">
               <MapPin className="w-3.5 h-3.5" />
@@ -314,12 +269,8 @@ export default function FolderDetail() {
 
       {/* ── Main content ──────────────────────────────────────────────────── */}
       <div className="max-w-5xl mx-auto px-4 md:px-8">
-
-        {/* ── Info bar ──────────────────────────────────────────────────── */}
         <div className="flex flex-col lg:flex-row gap-6 py-8 border-b border-border-dim">
           <div className="flex-1 space-y-5">
-
-            {/* Visibility selector — owner only */}
             {isOwner && (
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-[12px] font-medium text-text-dim uppercase tracking-wider">
@@ -363,7 +314,6 @@ export default function FolderDetail() {
               </div>
             )}
 
-            {/* Description */}
             <div>
               {isEditingDesc ? (
                 <div className="flex items-start gap-3">
@@ -407,7 +357,6 @@ export default function FolderDetail() {
               )}
             </div>
 
-            {/* Reactions bar */}
             <div className="flex flex-wrap items-center gap-2">
               {EMOJIS.map((emoji) => {
                 const count = Object.values(folder.reactions || {}).filter(
@@ -444,7 +393,6 @@ export default function FolderDetail() {
           </div>
         </div>
 
-        {/* ── Instagram-style 3-col Photo Grid ─────────────────────────── */}
         <div className="py-8">
           <h2 className="text-[13px] font-semibold text-text-dim uppercase tracking-widest mb-4">
             Photos · {photos.length}
@@ -470,11 +418,9 @@ export default function FolderDetail() {
                     loading="lazy"
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                   />
-                  {/* Hover overlay */}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors duration-300 flex items-center justify-center">
                     <Camera className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-all duration-300 drop-shadow-lg scale-75 group-hover:scale-100" />
                   </div>
-                  {/* GPS badge */}
                   {photo.hasGps && (
                     <div className="absolute bottom-1.5 left-1.5 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[9px] font-bold text-white uppercase tracking-wider flex items-center gap-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
                       <MapPin className="w-2.5 h-2.5 text-brand" />
@@ -487,7 +433,6 @@ export default function FolderDetail() {
           )}
         </div>
 
-        {/* ── Comments Section ──────────────────────────────────────────── */}
         <div className="mt-4 max-w-2xl border-t border-border-dim pt-10 pb-8">
           <h3 className="text-xl font-bold text-white mb-6">
             Bình luận
@@ -556,7 +501,6 @@ export default function FolderDetail() {
         </div>
       </div>
 
-      {/* ── Lightbox ──────────────────────────────────────────────────────── */}
       {lightboxElement}
     </div>
   );

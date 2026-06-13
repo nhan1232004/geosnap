@@ -1,16 +1,15 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { useAppStore } from './store/useAppStore';
-import { generateInviteCode } from './lib/utils';
+import { api } from './lib/api';
+import { connectSocket, disconnectSocket } from './lib/socket';
 import { ToastProvider, useToast } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sun, Moon, Menu, X } from 'lucide-react';
 import { initializePushNotifications } from './services/notifications';
 
 import Login from './pages/Login';
+import AuthCallback from './pages/AuthCallback';
 import Timeline from './pages/Timeline';
 import Upload from './pages/Upload';
 import MapViewPage from './pages/Map';
@@ -24,6 +23,7 @@ import Dashboard from './pages/Dashboard';
 import StoryViewer from './pages/StoryViewer';
 import Explore from './pages/Explore';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
+import { UserProfile } from './types';
 
 const NAV_ITEMS = [
   {
@@ -92,10 +92,10 @@ const NAV_ITEMS = [
   },
 ];
 
-// AppContent phải nằm BÊN TRONG ToastProvider để dùng được useToast
 function AppContent() {
   const { user, userProfile, authLoaded, unreadNotifications, theme, sidebarOpen, setUser, setAuthLoaded, setUserProfile, toggleTheme, setSidebarOpen } = useAppStore();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Apply theme class to document
   useEffect(() => {
@@ -114,47 +114,48 @@ function AppContent() {
     }
   }, [user, toast]);
 
+  // Authenticate user via JWT on mount
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-
-      if (currentUser) {
-        try {
-          const userRef = doc(db, 'users', currentUser.uid);
-          const userDoc = await getDoc(userRef);
-          if (!userDoc.exists()) {
-            const profileData = {
-              uid: currentUser.uid,
-              email: currentUser.email || '',
-              displayName: currentUser.displayName || '',
-              avatarUrl: currentUser.photoURL || '',
-              role: 'user',
-              inviteCode: generateInviteCode(),
-              createdAt: new Date().toISOString(),
-            };
-            await setDoc(userRef, profileData);
-            setUserProfile(profileData as any);
-          } else {
-            const data = userDoc.data();
-            if (!data || !data.inviteCode) {
-              const code = generateInviteCode();
-              await setDoc(userRef, { inviteCode: code }, { merge: true });
-              setUserProfile({ id: userDoc.id, ...data, inviteCode: code } as any);
-            } else {
-              setUserProfile({ id: userDoc.id, ...data } as any);
-            }
-          }
-        } catch (e) {
-          handleFirestoreError(e, OperationType.WRITE, 'users');
-        }
-      } else {
+    const fetchUser = async () => {
+      const token = api.getToken();
+      if (!token) {
+        setUser(null);
         setUserProfile(null);
+        setAuthLoaded(true);
+        return;
       }
 
-      setAuthLoaded(true);
-    });
-    return () => unsubscribe();
-  }, [setUser, setAuthLoaded, setUserProfile]);
+      try {
+        const profile = await api.get<UserProfile>('/api/v1/users/me');
+        setUser({
+          uid: profile.uid,
+          email: profile.email,
+          displayName: profile.displayName,
+          avatarUrl: profile.avatarUrl,
+        });
+        setUserProfile(profile);
+        connectSocket(token);
+      } catch (err) {
+        console.error('Failed to fetch authenticated user profile:', err);
+        api.setToken(null);
+        disconnectSocket();
+        setUser(null);
+        setUserProfile(null);
+      } finally {
+        setAuthLoaded(true);
+      }
+    };
+
+    fetchUser();
+  }, [setUser, setUserProfile, setAuthLoaded]);
+
+  const handleLogout = () => {
+    api.setToken(null);
+    disconnectSocket();
+    setUser(null);
+    setUserProfile(null);
+    navigate('/login');
+  };
 
   if (!authLoaded) {
     return (
@@ -167,212 +168,211 @@ function AppContent() {
     );
   }
 
-  const avatarUrl = userProfile?.avatarUrl || user?.photoURL;
+  const avatarUrl = userProfile?.avatarUrl || user?.avatarUrl;
   const displayName = userProfile?.displayName || user?.displayName || user?.email || 'User';
   const avatarInitial = displayName.charAt(0).toUpperCase();
 
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public invite page - no sidebar */}
-        <Route path="/invite/:code" element={<InvitePage />} />
-        <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
+    <Routes>
+      {/* Public invite page - no sidebar */}
+      <Route path="/invite/:code" element={<InvitePage />} />
+      <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
 
-        {/* App with sidebar */}
-        <Route path="/*" element={
-          !user ? <Navigate to="/login" /> : (
-            <div className="flex h-screen overflow-hidden relative">
-              <div className="atmosphere" />
+      {/* App with sidebar */}
+      <Route path="/*" element={
+        !user ? <Navigate to="/login" /> : (
+          <div className="flex h-screen overflow-hidden relative">
+            <div className="atmosphere" />
 
-              {/* Mobile overlay */}
-              {sidebarOpen && (
-                <div
-                  className="fixed inset-0 bg-overlay z-30 md:hidden"
+            {/* Mobile overlay */}
+            {sidebarOpen && (
+              <div
+                className="fixed inset-0 bg-overlay z-30 md:hidden"
+                onClick={() => setSidebarOpen(false)}
+              />
+            )}
+
+            {/* Desktop Sidebar */}
+            <aside className={`desktop-sidebar w-[240px] bg-sidebar-bg border-r border-border-dim backdrop-blur-xl flex flex-col shrink-0 relative z-10 ${sidebarOpen ? 'fixed inset-y-0 left-0 z-40 !flex md:relative' : ''}`}>
+              {/* Logo */}
+              <div className="px-6 pt-8 pb-6 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 bg-brand rounded-lg shadow-[0_0_20px_rgba(255,107,53,0.4)] flex items-center justify-center brand-pulse">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                      <circle cx="12" cy="10" r="3"/>
+                    </svg>
+                  </div>
+                  <span className="text-[20px] font-extrabold tracking-tight text-text-heading">GeoSnap</span>
+                </div>
+                {/* Close button - mobile only */}
+                <button
                   onClick={() => setSidebarOpen(false)}
-                />
-              )}
+                  className="md:hidden p-1.5 rounded-lg text-text-dim hover:text-text-main hover:bg-surface transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-              {/* Desktop Sidebar */}
-              <aside className={`desktop-sidebar w-[240px] bg-sidebar-bg border-r border-border-dim backdrop-blur-xl flex flex-col shrink-0 relative z-10 ${sidebarOpen ? 'fixed inset-y-0 left-0 z-40 !flex md:relative' : ''}`}>
-                {/* Logo */}
-                <div className="px-6 pt-8 pb-6 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 bg-brand rounded-lg shadow-[0_0_20px_rgba(255,107,53,0.4)] flex items-center justify-center brand-pulse">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                        <circle cx="12" cy="10" r="3"/>
-                      </svg>
-                    </div>
-                    <span className="text-[20px] font-extrabold tracking-tight text-text-heading">GeoSnap</span>
-                  </div>
-                  {/* Close button - mobile only */}
-                  <button
-                    onClick={() => setSidebarOpen(false)}
-                    className="md:hidden p-1.5 rounded-lg text-text-dim hover:text-text-main hover:bg-surface transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                {/* Nav */}
-                <nav className="flex-1 px-3">
-                  <ul className="flex flex-col gap-1">
-                    {NAV_ITEMS.map(item => (
-                      <li key={item.to}>
-                        <NavLink
-                          to={item.to}
-                          end={item.to === '/'}
-                          onClick={() => setSidebarOpen(false)}
-                          className={({ isActive }) =>
-                            `flex items-center gap-3 px-4 py-2.5 rounded-xl text-[14px] font-medium transition-all duration-150 ${
-                              isActive
-                                ? 'bg-brand/15 text-brand shadow-[inset_0_0_0_1px_rgba(255,107,53,0.25)]'
-                                : 'text-text-dim hover:text-text-main hover:bg-card-hover'
-                            }`
-                          }
-                        >
-                          {({ isActive }) => (
-                            <>
-                              <span className={isActive ? 'text-brand' : 'text-text-dim'}>{item.icon}</span>
-                              {item.label}
-                              {item.label === 'Bạn bè' && unreadNotifications > 0 && (
-                                <span className="ml-auto w-5 h-5 rounded-full bg-brand text-white text-[10px] font-bold flex items-center justify-center">
-                                  {unreadNotifications > 9 ? '9+' : unreadNotifications}
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </NavLink>
-                      </li>
-                    ))}
-                  </ul>
-                </nav>
-
-                {/* Theme Toggle */}
-                <div className="px-4 pb-2">
-                  <button
-                    onClick={toggleTheme}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-[14px] font-medium text-text-dim hover:text-text-main hover:bg-card-hover transition-all"
-                  >
-                    {theme === 'dark' ? (
-                      <><Sun className="w-[18px] h-[18px]" /> Chế độ sáng</>
-                    ) : (
-                      <><Moon className="w-[18px] h-[18px]" /> Chế độ tối</>
-                    )}
-                  </button>
-                </div>
-
-                {/* User Profile Bottom */}
-                <div className="p-4 border-t border-border-dim">
-                  <NavLink
-                    to={user ? `/profile/${user.uid}` : '/'}
-                    onClick={() => setSidebarOpen(false)}
-                    className="flex items-center gap-3 p-2 rounded-xl hover:bg-card-hover transition-all cursor-pointer group"
-                  >
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt={displayName} className="w-9 h-9 rounded-full object-cover ring-2 ring-border-dim group-hover:ring-brand/40 transition-all no-transition" />
-                    ) : (
-                      <div className="w-9 h-9 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center text-brand font-bold text-sm">
-                        {avatarInitial}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13px] font-semibold text-text-main truncate">{displayName}</div>
-                      <div className="text-[11px] text-text-dim truncate">{user?.email}</div>
-                    </div>
-                    <button
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); auth.signOut(); }}
-                      title="Đăng xuất"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-text-dim hover:text-red-400"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                        <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-                      </svg>
-                    </button>
-                  </NavLink>
-                </div>
-              </aside>
-
-              {/* Main content */}
-              <main className="flex-1 relative overflow-auto bg-bg-deep main-content">
-                {/* Mobile Header */}
-                <div className="md:hidden sticky top-0 z-20 bg-bg-deep/80 backdrop-blur-xl border-b border-border-dim px-4 py-3 flex items-center justify-between">
-                  <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-card-hover transition-colors">
-                    <Menu className="w-5 h-5 text-text-main" />
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 bg-brand rounded-md flex items-center justify-center">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                        <circle cx="12" cy="10" r="3"/>
-                      </svg>
-                    </div>
-                    <span className="text-[16px] font-bold text-text-heading">GeoSnap</span>
-                  </div>
-                  <button onClick={toggleTheme} className="p-2 rounded-lg hover:bg-card-hover transition-colors">
-                    {theme === 'dark' ? <Sun className="w-5 h-5 text-text-dim" /> : <Moon className="w-5 h-5 text-text-dim" />}
-                  </button>
-                </div>
-
-                <Routes>
-                  <Route path="/" element={<Timeline />} />
-                  <Route path="/map" element={<MapViewPage />} />
-                  <Route path="/upload" element={<Upload />} />
-                  <Route path="/folder/:id" element={<FolderDetail />} />
-                  <Route path="/friends" element={<Friends />} />
-                  <Route path="/feed" element={<Feed />} />
-                  <Route path="/explore" element={<Explore />} />
-                  <Route path="/messages" element={<Messages />} />
-                  <Route path="/profile/:uid" element={<Profile />} />
-                  <Route path="/story-viewer" element={<StoryViewer />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="*" element={<Navigate to="/" />} />
-                </Routes>
-                <PWAInstallPrompt />
-              </main>
-
-              {/* Mobile Bottom Navigation */}
-              <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 bg-bg-deep/90 backdrop-blur-xl border-t border-border-dim px-2 py-1 items-center justify-around">
-                {NAV_ITEMS.map(item => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.to === '/'}
-                    className={({ isActive }) =>
-                      `flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl text-[10px] font-medium transition-all ${
-                        isActive ? 'text-brand' : 'text-text-dim'
-                      }`
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <span className={isActive ? 'text-brand' : 'text-text-dim'}>{item.icon}</span>
-                        <span>{item.label}</span>
-                        {item.label === 'Bạn bè' && unreadNotifications > 0 && (
-                          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-brand text-white text-[8px] font-bold flex items-center justify-center">
-                            {unreadNotifications > 9 ? '9+' : unreadNotifications}
-                          </span>
+              {/* Nav */}
+              <nav className="flex-1 px-3">
+                <ul className="flex flex-col gap-1">
+                  {NAV_ITEMS.map(item => (
+                    <li key={item.to}>
+                      <NavLink
+                        to={item.to}
+                        end={item.to === '/'}
+                        onClick={() => setSidebarOpen(false)}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-4 py-2.5 rounded-xl text-[14px] font-medium transition-all duration-150 ${
+                            isActive
+                              ? 'bg-brand/15 text-brand shadow-[inset_0_0_0_1px_rgba(255,107,53,0.25)]'
+                              : 'text-text-dim hover:text-text-main hover:bg-card-hover'
+                          }`
+                        }
+                      >
+                        {({ isActive }) => (
+                          <>
+                            <span className={isActive ? 'text-brand' : 'text-text-dim'}>{item.icon}</span>
+                            {item.label}
+                            {item.label === 'Bạn bè' && unreadNotifications > 0 && (
+                              <span className="ml-auto w-5 h-5 rounded-full bg-brand text-white text-[10px] font-bold flex items-center justify-center">
+                                {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                              </span>
+                            )}
+                          </>
                         )}
-                      </>
-                    )}
-                  </NavLink>
-                ))}
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
               </nav>
-            </div>
-          )
-        } />
-      </Routes>
-    </BrowserRouter>
+
+              {/* Theme Toggle */}
+              <div className="px-4 pb-2">
+                <button
+                  onClick={toggleTheme}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-[14px] font-medium text-text-dim hover:text-text-main hover:bg-card-hover transition-all"
+                >
+                  {theme === 'dark' ? (
+                    <><Sun className="w-[18px] h-[18px]" /> Chế độ sáng</>
+                  ) : (
+                    <><Moon className="w-[18px] h-[18px]" /> Chế độ tối</>
+                  )}
+                </button>
+              </div>
+
+              {/* User Profile Bottom */}
+              <div className="p-4 border-t border-border-dim">
+                <div
+                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-card-hover transition-all cursor-pointer group"
+                  onClick={() => { setSidebarOpen(false); navigate(`/profile/${user?.uid}`); }}
+                >
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={displayName} className="w-9 h-9 rounded-full object-cover ring-2 ring-border-dim group-hover:ring-brand/40 transition-all no-transition" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center text-brand font-bold text-sm">
+                      {avatarInitial}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold text-text-main truncate">{displayName}</div>
+                    <div className="text-[11px] text-text-dim truncate">{user?.email}</div>
+                  </div>
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLogout(); }}
+                    title="Đăng xuất"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-text-dim hover:text-red-400"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                      <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </aside>
+
+            {/* Main content */}
+            <main className="flex-1 relative overflow-auto bg-bg-deep main-content">
+              {/* Mobile Header */}
+              <div className="md:hidden sticky top-0 z-20 bg-bg-deep/80 backdrop-blur-xl border-b border-border-dim px-4 py-3 flex items-center justify-between">
+                <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-card-hover transition-colors">
+                  <Menu className="w-5 h-5 text-text-main" />
+                </button>
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 bg-brand rounded-md flex items-center justify-center">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                      <circle cx="12" cy="10" r="3"/>
+                    </svg>
+                  </div>
+                  <span className="text-[16px] font-bold text-text-heading">GeoSnap</span>
+                </div>
+                <button onClick={toggleTheme} className="p-2 rounded-lg hover:bg-card-hover transition-colors">
+                  {theme === 'dark' ? <Sun className="w-5 h-5 text-text-dim" /> : <Moon className="w-5 h-5 text-text-dim" />}
+                </button>
+              </div>
+
+              <Routes>
+                <Route path="/" element={<Timeline />} />
+                <Route path="/map" element={<MapViewPage />} />
+                <Route path="/upload" element={<Upload />} />
+                <Route path="/folder/:id" element={<FolderDetail />} />
+                <Route path="/friends" element={<Friends />} />
+                <Route path="/feed" element={<Feed />} />
+                <Route path="/explore" element={<Explore />} />
+                <Route path="/messages" element={<Messages />} />
+                <Route path="/profile/:uid" element={<Profile />} />
+                <Route path="/story-viewer" element={<StoryViewer />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="*" element={<Navigate to="/" />} />
+              </Routes>
+              <PWAInstallPrompt />
+            </main>
+
+            {/* Mobile Bottom Navigation */}
+            <nav className="mobile-bottom-nav fixed bottom-0 left-0 right-0 z-20 bg-bg-deep/90 backdrop-blur-xl border-t border-border-dim px-2 py-1 items-center justify-around">
+              {NAV_ITEMS.map(item => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/'}
+                  className={({ isActive }) =>
+                    `flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl text-[10px] font-medium transition-all ${
+                      isActive ? 'text-brand' : 'text-text-dim'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span className={isActive ? 'text-brand' : 'text-text-dim'}>{item.icon}</span>
+                      <span>{item.label}</span>
+                      {item.label === 'Bạn bè' && unreadNotifications > 0 && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-brand text-white text-[8px] font-bold flex items-center justify-center">
+                          {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+        )
+      } />
+    </Routes>
   );
 }
 
-// App là root component: wrap ErrorBoundary + ToastProvider bên ngoài AppContent
 export default function App() {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <AppContent />
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
       </ToastProvider>
     </ErrorBoundary>
   );

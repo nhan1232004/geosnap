@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
-import { db } from '../firebase';
 import { useAppStore } from '../store/useAppStore';
-import { LocationFolder, Photo } from '../types';
+import { LocationFolder } from '../types';
 import {
   Camera,
   MapPin,
@@ -10,35 +8,31 @@ import {
   Compass,
   Image as ImageIcon,
 } from 'lucide-react';
-import { format, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, subYears, startOfWeek, addDays, isSameDay } from 'date-fns';
+import { format, subYears, startOfWeek, addDays } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import { api } from '../lib/api';
+
+interface DashboardData {
+  stats: {
+    totalPhotos: number;
+    totalLocations: number;
+    totalCountries: number;
+    totalFriends: number;
+    countries: string[];
+    farthestLocation: string;
+    mostActiveMonth: string;
+  };
+  topFolders: LocationFolder[];
+  monthlyData: { month: string; count: number }[];
+  heatmap: Record<string, number>;
+  timeline: LocationFolder[];
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function buildHeatmapGrid(photos: Photo[]): { date: Date; count: number }[][] {
-  // 52 weeks x 7 days, starting from 52 weeks ago
+function buildHeatmapGrid(heatmapRecord: Record<string, number>): { date: Date; count: number }[][] {
   const today = new Date();
   const start = startOfWeek(subYears(today, 1), { weekStartsOn: 1 });
-
-  // map dateKey -> count
-  const dateMap: Record<string, number> = {};
-  for (const photo of photos) {
-    const d = new Date(photo.uploadedAt);
-    const key = format(d, 'yyyy-MM-dd');
-    dateMap[key] = (dateMap[key] ?? 0) + 1;
-  }
 
   const weeks: { date: Date; count: number }[][] = [];
   let cursor = start;
@@ -47,7 +41,7 @@ function buildHeatmapGrid(photos: Photo[]): { date: Date; count: number }[][] {
     for (let d = 0; d < 7; d++) {
       const day = addDays(cursor, d);
       const key = format(day, 'yyyy-MM-dd');
-      week.push({ date: day, count: dateMap[key] ?? 0 });
+      week.push({ date: day, count: heatmapRecord[key] ?? 0 });
     }
     weeks.push(week);
     cursor = addDays(cursor, 7);
@@ -129,7 +123,6 @@ function HeatmapSection({ weeks, max }: HeatmapProps) {
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
   const days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
-  // month labels: pick first week of each month
   const monthLabels = useMemo(() => {
     const labels: { label: string; col: number }[] = [];
     let lastMonth = -1;
@@ -158,7 +151,6 @@ function HeatmapSection({ weeks, max }: HeatmapProps) {
         </div>
       </div>
 
-      {/* Month labels */}
       <div className="flex mb-1 pl-8" style={{ gap: '2px' }}>
         {weeks.map((_, col) => {
           const lbl = monthLabels.find((m) => m.col === col);
@@ -171,7 +163,6 @@ function HeatmapSection({ weeks, max }: HeatmapProps) {
       </div>
 
       <div className="flex gap-0.5">
-        {/* Day labels column */}
         <div className="flex flex-col gap-0.5 pr-1.5">
           {days.map((d) => (
             <div key={d} className="h-3 text-[9px] text-text-dim leading-3 flex items-center">
@@ -179,7 +170,6 @@ function HeatmapSection({ weeks, max }: HeatmapProps) {
             </div>
           ))}
         </div>
-        {/* Grid */}
         <div className="flex gap-0.5 flex-1">
           {weeks.map((week, wi) => (
             <div key={wi} className="flex flex-col gap-0.5 flex-1 min-w-[10px]">
@@ -266,42 +256,22 @@ function TopLocations({ folders }: TopLocationsProps) {
 // ─── PhotosByMonth ────────────────────────────────────────────────────────────
 
 interface PhotosByMonthProps {
-  photos: Photo[];
+  monthlyData: { month: string; count: number }[];
 }
 
-function PhotosByMonth({ photos }: PhotosByMonthProps) {
+function PhotosByMonth({ monthlyData }: PhotosByMonthProps) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-
-  const months = useMemo(() => {
-    const result: { label: string; count: number; monthKey: string }[] = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = subMonths(new Date(), i);
-      const start = startOfMonth(d);
-      const end = endOfMonth(d);
-      const count = photos.filter((p) => {
-        const pd = new Date(p.uploadedAt);
-        return pd >= start && pd <= end;
-      }).length;
-      result.push({
-        label: format(d, 'MMM', { locale: vi }),
-        count,
-        monthKey: format(d, 'yyyy-MM'),
-      });
-    }
-    return result;
-  }, [photos]);
-
-  const maxCount = Math.max(...months.map((m) => m.count), 1);
+  const maxCount = Math.max(...monthlyData.map((m) => m.count), 1);
 
   return (
     <div className="glass-card rounded-2xl p-6 stagger-item">
       <h2 className="text-lg font-bold text-text-heading mb-5">Ảnh theo tháng</h2>
       <div className="flex items-end gap-1.5 h-40">
-        {months.map((m, i) => {
+        {monthlyData.map((m, i) => {
           const heightPct = (m.count / maxCount) * 100;
           return (
             <div
-              key={m.monthKey}
+              key={m.month}
               className="flex-1 flex flex-col items-center gap-1 group cursor-default"
               onMouseEnter={() => setHoveredIdx(i)}
               onMouseLeave={() => setHoveredIdx(null)}
@@ -321,7 +291,7 @@ function PhotosByMonth({ photos }: PhotosByMonthProps) {
                   style={{ height: `${Math.max(heightPct, m.count > 0 ? 4 : 0)}%` }}
                 />
               </div>
-              <span className="text-[9px] text-text-dim font-medium capitalize">{m.label}</span>
+              <span className="text-[9px] text-text-dim font-medium capitalize">{m.month.split(' ')[0]}</span>
             </div>
           );
         })}
@@ -334,10 +304,9 @@ function PhotosByMonth({ photos }: PhotosByMonthProps) {
 
 interface JourneyTimelineProps {
   folders: LocationFolder[];
-  photosMap: Map<string, number>;
 }
 
-function JourneyTimeline({ folders, photosMap }: JourneyTimelineProps) {
+function JourneyTimeline({ folders }: JourneyTimelineProps) {
   const sorted = useMemo(
     () => [...folders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [folders]
@@ -350,12 +319,10 @@ function JourneyTimeline({ folders, photosMap }: JourneyTimelineProps) {
         <div className="text-text-dim text-sm py-8 text-center">Chưa có hành trình nào</div>
       ) : (
         <div className="relative">
-          {/* vertical line */}
           <div className="absolute left-4 top-2 bottom-2 w-px bg-gradient-to-b from-brand/60 via-brand/20 to-transparent" />
           <div className="flex flex-col gap-0">
             {sorted.map((folder, i) => (
               <div key={folder.id} className="flex gap-4 group stagger-item" style={{ animationDelay: `${i * 40}ms` }}>
-                {/* dot */}
                 <div className="relative flex-shrink-0 flex flex-col items-center">
                   <div
                     className={`w-8 h-8 rounded-full border-2 flex items-center justify-center z-10 transition-all duration-200 ${
@@ -369,10 +336,8 @@ function JourneyTimeline({ folders, photosMap }: JourneyTimelineProps) {
                   {i < sorted.length - 1 && <div className="w-px flex-1 min-h-[24px] bg-border-dim mt-1" />}
                 </div>
 
-                {/* content */}
                 <div className="flex-1 pb-5 pt-0.5">
                   <div className="flex items-start gap-3">
-                    {/* thumbnail */}
                     {folder.coverPhotoUrl ? (
                       <img
                         src={folder.coverPhotoUrl}
@@ -398,7 +363,7 @@ function JourneyTimeline({ folders, photosMap }: JourneyTimelineProps) {
                       <div className="flex items-center gap-3 mt-1.5">
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-text-dim bg-surface border border-border-dim rounded-full px-2.5 py-0.5">
                           <Camera className="w-3 h-3" />
-                          {photosMap.get(folder.id ?? '') ?? folder.photoCount} ảnh
+                          {folder.photoCount} ảnh
                         </span>
                         {(folder.city || folder.country) && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-text-dim">
@@ -423,29 +388,17 @@ function JourneyTimeline({ folders, photosMap }: JourneyTimelineProps) {
 
 export default function Dashboard() {
   const { user } = useAppStore();
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [folders, setFolders] = useState<LocationFolder[]>([]);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
 
-    async function fetchData() {
+    async function fetchStats() {
       setLoading(true);
       try {
-        const [photosSnap, foldersSnap] = await Promise.all([
-          getDocs(query(collection(db, 'photos'), where('uid', '==', user!.uid))),
-          getDocs(
-            query(
-              collection(db, 'folders'),
-              where('uid', '==', user!.uid),
-              orderBy('createdAt', 'desc')
-            )
-          ),
-        ]);
-
-        setPhotos(photosSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Photo)));
-        setFolders(foldersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LocationFolder)));
+        const res = await api.get<DashboardData>('/api/v1/dashboard/stats');
+        setData(res);
       } catch (err) {
         console.error('Dashboard data fetch error:', err);
       } finally {
@@ -453,64 +406,21 @@ export default function Dashboard() {
       }
     }
 
-    fetchData();
+    fetchStats();
   }, [user]);
 
-  // ── Derived stats ──────────────────────────────────────────────────────────
-
-  const totalPhotos = photos.length;
-  const totalLocations = folders.length;
-
-  const mostActiveMonth = useMemo(() => {
-    if (photos.length === 0) return '—';
-    const counts: Record<string, number> = {};
-    for (const p of photos) {
-      const key = format(new Date(p.uploadedAt), 'MM/yyyy');
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-    const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-    if (!best) return '—';
-    const [monthStr] = best;
-    const [mm, yyyy] = monthStr.split('/');
-    const d = new Date(Number(yyyy), Number(mm) - 1);
-    return format(d, 'MMMM yyyy', { locale: vi });
-  }, [photos]);
-
-  // Farthest location from user's first folder (used as "home")
-  const farthestLocation = useMemo(() => {
-    if (folders.length < 2) return '—';
-    const home = folders[folders.length - 1]; // earliest
-    let maxDist = 0;
-    let farthest: LocationFolder | null = null;
-    for (const f of folders) {
-      if (f.id === home.id) continue;
-      const d = haversineKm(home.centerLat, home.centerLng, f.centerLat, f.centerLng);
-      if (d > maxDist) {
-        maxDist = d;
-        farthest = f;
-      }
-    }
-    if (!farthest) return '—';
-    return `${farthest.name} · ${Math.round(maxDist).toLocaleString()} km`;
-  }, [folders]);
-
-  // Build photos-per-folder map for the timeline
-  const photosMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const p of photos) {
-      if (p.folderId) map.set(p.folderId, (map.get(p.folderId) ?? 0) + 1);
-    }
-    return map;
-  }, [photos]);
-
   // Heatmap
-  const heatmapWeeks = useMemo(() => buildHeatmapGrid(photos), [photos]);
-  const heatmapMax = useMemo(
-    () => Math.max(...heatmapWeeks.flat().map((c) => c.count), 1),
-    [heatmapWeeks]
-  );
+  const heatmapWeeks = useMemo(() => {
+    if (!data) return [];
+    return buildHeatmapGrid(data.heatmap);
+  }, [data]);
 
-  if (loading) return <DashboardSkeleton />;
+  const heatmapMax = useMemo(() => {
+    if (heatmapWeeks.length === 0) return 1;
+    return Math.max(...heatmapWeeks.flat().map((c) => c.count), 1);
+  }, [heatmapWeeks]);
+
+  if (loading || !data) return <DashboardSkeleton />;
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto flex flex-col gap-8 page-enter">
@@ -528,31 +438,31 @@ export default function Dashboard() {
         <StatCard
           icon={<Camera className="w-5 h-5" />}
           label="Tổng ảnh đã chụp"
-          value={totalPhotos.toLocaleString()}
+          value={data.stats.totalPhotos.toLocaleString()}
           sub="ảnh trong kho"
           delay={0}
         />
         <StatCard
           icon={<MapPin className="w-5 h-5" />}
           label="Địa điểm đã ghé"
-          value={totalLocations.toLocaleString()}
+          value={data.stats.totalLocations.toLocaleString()}
           sub="vị trí unique"
           delay={50}
         />
         <StatCard
           icon={<Activity className="w-5 h-5" />}
           label="Tháng hoạt động nhất"
-          value={mostActiveMonth === '—' ? '—' : mostActiveMonth.split(' ')[0]}
-          sub={mostActiveMonth !== '—' ? mostActiveMonth.split(' ')[1] ?? '' : 'Chưa có dữ liệu'}
+          value={data.stats.mostActiveMonth === '—' ? '—' : data.stats.mostActiveMonth.split(' ')[0]}
+          sub={data.stats.mostActiveMonth !== '—' ? data.stats.mostActiveMonth.split(' ')[1] ?? '' : 'Chưa có dữ liệu'}
           delay={100}
         />
         <StatCard
           icon={<Compass className="w-5 h-5" />}
           label="Địa điểm xa nhất"
-          value={farthestLocation === '—' ? '—' : farthestLocation.split('·')[0].trim()}
+          value={data.stats.farthestLocation === '—' ? '—' : data.stats.farthestLocation.split('·')[0].trim()}
           sub={
-            farthestLocation !== '—'
-              ? farthestLocation.split('·')[1]?.trim() ?? ''
+            data.stats.farthestLocation !== '—'
+              ? data.stats.farthestLocation.split('·')[1]?.trim() ?? ''
               : 'Cần thêm địa điểm'
           }
           delay={150}
@@ -564,12 +474,12 @@ export default function Dashboard() {
 
       {/* Top Locations + Photos by Month */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TopLocations folders={folders} />
-        <PhotosByMonth photos={photos} />
+        <TopLocations folders={data.topFolders} />
+        <PhotosByMonth monthlyData={data.monthlyData} />
       </div>
 
       {/* Journey Timeline */}
-      <JourneyTimeline folders={folders} photosMap={photosMap} />
+      <JourneyTimeline folders={data.timeline} />
     </div>
   );
 }

@@ -1,9 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import {
-  collection, query, where, getDocs, addDoc, updateDoc,
-  doc, onSnapshot, orderBy, getDoc
-} from 'firebase/firestore';
-import { db } from '../firebase';
+import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { Friendship, UserProfile } from '../types';
 import { timeAgo } from '../lib/utils';
@@ -37,52 +33,60 @@ export default function Friends() {
     if (!user) return;
     setLoading(true);
     try {
-      const [sentSnap, receivedSnap] = await Promise.all([
-        getDocs(query(collection(db, 'friendships'), where('requesterId', '==', user.uid))),
-        getDocs(query(collection(db, 'friendships'), where('addresseeId', '==', user.uid))),
-      ]);
-
-      const all = [
-        ...sentSnap.docs.map(d => ({ id: d.id, ...d.data() } as Friendship)),
-        ...receivedSnap.docs.map(d => ({ id: d.id, ...d.data() } as Friendship)),
-      ];
-
-      const enriched = await Promise.all(all.map(async (f) => {
-        const otherId = f.requesterId === user.uid ? f.addresseeId : f.requesterId;
-        const snap = await getDoc(doc(db, 'users', otherId));
-        const otherUser = snap.exists() ? { uid: snap.id, ...snap.data() } as UserProfile : { uid: otherId, displayName: 'Unknown', email: '' } as UserProfile;
-        return { ...f, otherUser };
-      }));
+      const res = await api.get<{ friendships: any[] }>('/api/v1/friendships');
+      const enriched = res.friendships.map(f => {
+        const isRequester = f.requesterId === user.uid;
+        const other = isRequester ? f.addressee : f.requester;
+        const otherUser: UserProfile = {
+          uid: other.id,
+          email: other.email,
+          displayName: other.displayName || undefined,
+          avatarUrl: other.avatarUrl || undefined,
+          role: 'user',
+          createdAt: '',
+        };
+        return {
+          id: f.id,
+          requesterId: f.requesterId,
+          addresseeId: f.addresseeId,
+          status: f.status,
+          createdAt: f.createdAt,
+          updatedAt: f.updatedAt,
+          otherUser,
+        };
+      });
 
       setFriends(enriched.filter(f => f.status === 'accepted'));
       const incomingPending = enriched.filter(f => f.status === 'pending' && f.addresseeId === user.uid);
       setPending(incomingPending);
       setUnreadNotifications(incomingPending.length);
     } catch (e) {
-      console.error(e);
+      console.error('Failed to fetch friendships:', e);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, setUnreadNotifications]);
 
   useEffect(() => { fetchFriendships(); }, [fetchFriendships]);
 
   const handleAccept = async (friendship: Friendship) => {
     if (!friendship.id) return;
-    await updateDoc(doc(db, 'friendships', friendship.id), {
-      status: 'accepted',
-      updatedAt: new Date().toISOString(),
-    });
-    fetchFriendships();
+    try {
+      await api.put(`/api/v1/friendships/${friendship.id}`, { status: 'accepted' });
+      fetchFriendships();
+    } catch (e) {
+      console.error('Failed to accept friendship:', e);
+    }
   };
 
   const handleDecline = async (friendship: Friendship) => {
     if (!friendship.id) return;
-    await updateDoc(doc(db, 'friendships', friendship.id), {
-      status: 'blocked',
-      updatedAt: new Date().toISOString(),
-    });
-    fetchFriendships();
+    try {
+      await api.put(`/api/v1/friendships/${friendship.id}`, { status: 'blocked' });
+      fetchFriendships();
+    } catch (e) {
+      console.error('Failed to decline friendship:', e);
+    }
   };
 
   return (

@@ -1,35 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from 'firebase/auth';
-import { auth, googleAuthProvider, facebookAuthProvider } from '../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
-import { generateInviteCode } from '../lib/utils';
+import { useAppStore } from '../store/useAppStore';
+import { api } from '../lib/api';
+import { connectSocket } from '../lib/socket';
 import { Eye, EyeOff, MapPin, Camera, Globe, Users, ArrowLeft, Mail } from 'lucide-react';
 
 type AuthMode = 'choose' | 'email-login' | 'email-register' | 'forgot-password';
-
-function ensureUserDoc(uid: string, displayName: string | null, email: string | null, photoURL: string | null) {
-  return getDoc(doc(db, 'users', uid)).then(snap => {
-    if (!snap.exists()) {
-      const userData = {
-        uid,
-        email: email || '',
-        displayName: displayName || '',
-        avatarUrl: photoURL || '',
-        role: 'user',
-        inviteCode: generateInviteCode(),
-        createdAt: new Date().toISOString(),
-      };
-      return setDoc(doc(db, 'users', uid), userData);
-    }
-  }).catch(error => {
-    console.error('Error creating user doc:', error);
-    if (error.code === 'permission-denied') {
-      throw new Error('Lỗi bảo mật: Không thể tạo tài khoản. Vui lòng thử lại.');
-    }
-    throw error;
-  });
-}
 
 // Animated floating blob
 function Blob({ className }: { className: string }) {
@@ -52,6 +27,7 @@ function StatCard({ icon, value, label }: { icon: React.ReactNode; value: string
 }
 
 export default function Login() {
+  const { setUser, setUserProfile } = useAppStore();
   const [mode, setMode] = useState<AuthMode>('choose');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -64,35 +40,34 @@ export default function Login() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  const handleGoogle = async () => {
-    setError(''); setLoading(true);
-    try {
-      const result = await signInWithPopup(auth, googleAuthProvider);
-      const u = result.user;
-      await ensureUserDoc(u.uid, u.displayName, u.email, u.photoURL);
-    } catch (e: any) {
-      setError(e.message || 'Google login thất bại');
-    } finally { setLoading(false); }
+  const handleGoogle = () => {
+    setError('');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    window.location.href = `${apiUrl}/auth/google`;
   };
 
-  const handleFacebook = async () => {
-    setError(''); setLoading(true);
-    try {
-      const result = await signInWithPopup(auth, facebookAuthProvider);
-      const u = result.user;
-      await ensureUserDoc(u.uid, u.displayName, u.email, u.photoURL);
-    } catch (e: any) {
-      setError(e.message || 'Facebook login thất bại');
-    } finally { setLoading(false); }
+  const handleFacebook = () => {
+    setError('');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    window.location.href = `${apiUrl}/auth/facebook`;
   };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch {
-      setError('Email hoặc mật khẩu không đúng.');
+      const data = await api.post<{ token: string; user: any }>('/auth/login', { email, password });
+      api.setToken(data.token);
+      setUser({
+        uid: data.user.uid,
+        email: data.user.email,
+        displayName: data.user.displayName,
+        avatarUrl: data.user.avatarUrl,
+      });
+      setUserProfile(data.user);
+      connectSocket(data.token);
+    } catch (err: any) {
+      setError(err.message || 'Email hoặc mật khẩu không đúng.');
     } finally { setLoading(false); }
   };
 
@@ -100,14 +75,22 @@ export default function Login() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      const result = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(result.user, { displayName: name });
-      await ensureUserDoc(result.user.uid, name, email, null);
-    } catch (e: any) {
-      if (e.code === 'auth/email-already-in-use') setError('Email đã được sử dụng.');
-      else if (e.code === 'auth/weak-password') setError('Mật khẩu quá yếu (tối thiểu 6 ký tự).');
-      else if (e.code === 'auth/invalid-email') setError('Email không hợp lệ.');
-      else setError(e.message || 'Không thể tạo tài khoản. Vui lòng thử lại.');
+      const data = await api.post<{ token: string; user: any }>('/auth/register', {
+        email,
+        password,
+        displayName: name,
+      });
+      api.setToken(data.token);
+      setUser({
+        uid: data.user.uid,
+        email: data.user.email,
+        displayName: data.user.displayName,
+        avatarUrl: data.user.avatarUrl,
+      });
+      setUserProfile(data.user);
+      connectSocket(data.token);
+    } catch (err: any) {
+      setError(err.message || 'Không thể tạo tài khoản. Vui lòng thử lại.');
     } finally { setLoading(false); }
   };
 
@@ -115,10 +98,10 @@ export default function Login() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      await sendPasswordResetEmail(auth, email);
+      await api.post('/auth/reset-password', { email });
       setSuccessMsg('Đã gửi email đặt lại mật khẩu. Kiểm tra hộp thư của bạn!');
-    } catch {
-      setError('Email không tồn tại hoặc không hợp lệ.');
+    } catch (err: any) {
+      setError(err.message || 'Email không tồn tại hoặc không hợp lệ.');
     } finally { setLoading(false); }
   };
 

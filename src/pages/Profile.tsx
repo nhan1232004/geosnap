@@ -1,17 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  doc,
-  getDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-  addDoc,
-  updateDoc,
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { UserProfile, LocationFolder, Friendship } from '../types';
 import {
@@ -29,37 +18,33 @@ import {
 } from 'lucide-react';
 import { useToast } from '../components/ToastContainer';
 
-/* ===== Types ===== */
 type TabKey = 'photos' | 'map' | 'liked';
 
 /* ===== Skeleton ===== */
 function ProfileSkeleton() {
   return (
     <div className="mx-auto max-w-4xl animate-pulse">
-      {/* Cover skeleton */}
-      <div className="skeleton w-full h-52 rounded-none" />
-      {/* Card skeleton */}
+      <div className="skeleton w-full h-52 bg-surface rounded-none" />
       <div className="mx-4 -mt-16 bg-bg-card border border-border-dim rounded-3xl p-8 mb-8">
         <div className="flex gap-6">
-          <div className="skeleton w-28 h-28 rounded-full shrink-0" />
+          <div className="skeleton w-28 h-28 bg-surface rounded-full shrink-0" />
           <div className="flex-1 space-y-3 pt-2">
-            <div className="skeleton h-6 w-48 rounded-lg" />
-            <div className="skeleton h-4 w-72 rounded-lg" />
+            <div className="skeleton h-6 w-48 bg-surface rounded-lg" />
+            <div className="skeleton h-4 w-72 bg-surface rounded-lg" />
             <div className="flex gap-8 mt-4">
               {[...Array(4)].map((_, i) => (
                 <div key={i} className="space-y-1">
-                  <div className="skeleton h-5 w-8 rounded" />
-                  <div className="skeleton h-3 w-12 rounded" />
+                  <div className="skeleton h-5 w-8 bg-surface rounded" />
+                  <div className="skeleton h-3 w-12 bg-surface rounded" />
                 </div>
               ))}
             </div>
           </div>
         </div>
       </div>
-      {/* Grid skeleton */}
       <div className="mx-4 grid grid-cols-2 md:grid-cols-3 gap-3">
         {[...Array(6)].map((_, i) => (
-          <div key={i} className="skeleton rounded-2xl" style={{ height: i % 3 === 1 ? '200px' : '160px' }} />
+          <div key={i} className="skeleton bg-surface rounded-2xl" style={{ height: i % 3 === 1 ? '200px' : '160px' }} />
         ))}
       </div>
     </div>
@@ -97,40 +82,18 @@ export default function Profile() {
       try {
         setLoading(true);
         // Fetch Profile
-        const userDoc = await getDoc(doc(db, 'users', uid));
-        if (userDoc.exists()) {
-          setProfile({ uid: userDoc.id, ...userDoc.data() } as UserProfile);
-        }
+        const userProfileData = await api.get<UserProfile>(`/api/v1/users/${uid}`);
+        setProfile(userProfileData);
 
         // Fetch Friendship Status (if not self)
-        let isFriend = false;
         if (user && user.uid !== uid) {
-          const [sent, received] = await Promise.all([
-            getDocs(query(collection(db, 'friendships'), where('requesterId', '==', user.uid), where('addresseeId', '==', uid))),
-            getDocs(query(collection(db, 'friendships'), where('requesterId', '==', uid), where('addresseeId', '==', user.uid))),
-          ]);
-          const existing = [...sent.docs, ...received.docs];
-          if (existing.length > 0) {
-            const f = { id: existing[0].id, ...existing[0].data() } as Friendship;
-            setFriendship(f);
-            isFriend = f.status === 'accepted';
-          }
-        } else if (user && user.uid === uid) {
-          isFriend = true;
+          const res = await api.get<{ friendship: Friendship | null }>(`/api/v1/friendships/status?userId=${uid}`);
+          setFriendship(res.friendship);
         }
 
-        // Fetch Folders based on Friendship status
-        const q = query(collection(db, 'folders'), where('uid', '==', uid));
-        const folderSnaps = await getDocs(q);
-        const allFolders = folderSnaps.docs.map(d => ({ id: d.id, ...d.data() } as LocationFolder));
-
-        const visibleFolders = allFolders.filter(f => {
-          if (user?.uid === uid) return true;
-          if (f.visibility === 'public') return true;
-          if (f.visibility === 'friends' && isFriend) return true;
-          return false;
-        });
-
+        // Fetch Folders (Privacy filters handled by backend)
+        const folderRes = await api.get<{ folders: LocationFolder[] }>(`/api/v1/folders/user/${uid}`);
+        const visibleFolders = folderRes.folders;
         visibleFolders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setFolders(visibleFolders);
       } catch (err) {
@@ -159,14 +122,13 @@ export default function Profile() {
     if (!user || !profile) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
+      const updatedProfile = await api.put<UserProfile>('/api/v1/users/me', {
         displayName: editForm.displayName,
         bio: editForm.bio,
         avatarUrl: editForm.avatarUrl,
       });
-      const updated = { ...profile, ...editForm };
-      setProfile(updated);
-      setUserProfile(updated as Parameters<typeof setUserProfile>[0]);
+      setProfile(updatedProfile);
+      setUserProfile(updatedProfile);
       setIsEditing(false);
       toast('Hồ sơ đã được cập nhật thành công!', 'success');
     } catch (err) {
@@ -177,23 +139,17 @@ export default function Profile() {
     }
   };
 
-  /* ---- Avatar upload (Firebase Storage with base64 fallback) ---- */
+  /* ---- Avatar upload ---- */
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
     setUploadingAvatar(true);
     try {
-      const storageRef = ref(storage, `avatars/${user.uid}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      setEditForm(prev => ({ ...prev, avatarUrl: url }));
-    } catch {
-      // Fallback to base64
-      const reader = new FileReader();
-      reader.onload = ev => {
-        setEditForm(prev => ({ ...prev, avatarUrl: ev.target?.result as string }));
-      };
-      reader.readAsDataURL(file);
+      const res = await api.uploadAvatar(file);
+      setEditForm(prev => ({ ...prev, avatarUrl: res.url }));
+    } catch (err) {
+      console.error(err);
+      toast('Không thể tải ảnh đại diện lên.', 'error');
     } finally {
       setUploadingAvatar(false);
     }
@@ -205,15 +161,12 @@ export default function Profile() {
     if (!file || !user || !profile) return;
     setUploadingCover(true);
     try {
-      const storageRef = ref(storage, `covers/${user.uid}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'users', user.uid), { coverUrl: url });
-      setProfile(prev => prev ? { ...prev, coverUrl: url } : prev);
+      const res = await api.uploadCover(file);
+      setProfile(prev => prev ? { ...prev, coverUrl: res.url } : prev);
       toast('Ảnh bìa đã được cập nhật!', 'success');
     } catch (err) {
       console.error(err);
-      toast('Không thể tải ảnh bìa.', 'error');
+      toast('Không thể tải ảnh bìa lên.', 'error');
     } finally {
       setUploadingCover(false);
     }
@@ -224,29 +177,17 @@ export default function Profile() {
     if (!profile || !user) return;
     setSendingRequest(true);
     try {
-      const friendshipData: Friendship = {
-        requesterId: user.uid,
-        addresseeId: profile.uid,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-      };
-      const docRef = await addDoc(collection(db, 'friendships'), friendshipData);
-      setFriendship({ id: docRef.id, ...friendshipData });
-      await addDoc(collection(db, 'notifications'), {
-        recipientId: profile.uid,
-        actorId: user.uid,
-        type: 'friend_request',
-        isRead: false,
-        createdAt: new Date().toISOString(),
-      });
+      const res = await api.post<{ friendship: Friendship }>('/api/v1/friendships', { addresseeId: profile.uid });
+      setFriendship(res.friendship);
+      toast('Đã gửi lời mời kết bạn!', 'success');
     } catch (e) {
       console.error(e);
+      toast('Không thể gửi lời mời kết bạn.', 'error');
     } finally {
       setSendingRequest(false);
     }
   };
 
-  /* ---- Render states ---- */
   if (loading) return <ProfileSkeleton />;
   if (!profile) {
     return (
@@ -259,15 +200,12 @@ export default function Profile() {
 
   const isSelf = user?.uid === profile.uid;
 
-  // Derive stats
   const uniqueCountries = new Set(folders.filter(f => f.country).map(f => f.country)).size;
   const uniqueCities = new Set(folders.filter(f => f.city).map(f => f.city)).size;
   const totalPhotos = folders.reduce((sum, f) => sum + f.photoCount, 0);
 
-  // coverUrl may not exist in type yet — cast through unknown
-  const coverUrl = (profile as unknown as Record<string, string>)['coverUrl'] as string | undefined;
+  const coverUrl = (profile as any).coverUrl;
 
-  /* ===== TABS CONFIG ===== */
   const tabs: { key: TabKey; label: string; icon: string }[] = [
     { key: 'photos', label: 'Ảnh', icon: '📷' },
     { key: 'map', label: 'Bản đồ', icon: '🗺️' },
@@ -276,7 +214,6 @@ export default function Profile() {
 
   return (
     <div className="page-enter pb-20">
-      {/* Hidden file inputs */}
       <input
         ref={coverInputRef}
         type="file"
@@ -303,10 +240,8 @@ export default function Profile() {
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-brand/30 via-purple-900/20 to-bg-deep" />
         )}
-        {/* Overlay gradient for readability */}
         <div className="absolute inset-0 bg-gradient-to-t from-bg-deep/60 to-transparent pointer-events-none" />
 
-        {/* Upload cover button */}
         {isSelf && (
           <button
             onClick={() => coverInputRef.current?.click()}
@@ -329,7 +264,6 @@ export default function Profile() {
           </button>
         )}
 
-        {/* Back button */}
         <button
           onClick={() => window.history.back()}
           className="absolute top-4 left-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg
@@ -344,8 +278,7 @@ export default function Profile() {
       {/* ===== PROFILE CARD ===== */}
       <div className="mx-4 md:mx-auto md:max-w-4xl -mt-16 relative z-10">
         {isEditing && isSelf ? (
-          /* ---- Edit Form ---- */
-          <div className="glass-card rounded-3xl p-8 mb-8 relative overflow-hidden">
+          <div className="glass-card rounded-3xl p-8 mb-8 relative overflow-hidden bg-bg-card/75 border border-border-dim">
             <div className="absolute top-0 right-0 w-72 h-72 bg-brand/8 rounded-full blur-[80px] pointer-events-none" />
             <div className="relative z-10 max-w-xl">
               <div className="flex items-center justify-between mb-6">
@@ -358,7 +291,6 @@ export default function Profile() {
                 </button>
               </div>
 
-              {/* Avatar upload */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-text-main mb-3">Ảnh đại diện</label>
                 <div className="flex items-center gap-4">
@@ -389,7 +321,6 @@ export default function Profile() {
                 </div>
               </div>
 
-              {/* Display name */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-text-main mb-2">Tên hiển thị</label>
                 <input
@@ -402,7 +333,6 @@ export default function Profile() {
                 />
               </div>
 
-              {/* Bio */}
               <div className="mb-8">
                 <label className="block text-sm font-medium text-text-main mb-2">Tiểu sử</label>
                 <textarea
@@ -434,12 +364,10 @@ export default function Profile() {
             </div>
           </div>
         ) : (
-          /* ---- Profile View ---- */
-          <div className="glass-card rounded-3xl p-6 md:p-8 mb-6 relative overflow-hidden">
+          <div className="glass-card rounded-3xl p-6 md:p-8 mb-6 relative overflow-hidden bg-bg-card/75 border border-border-dim">
             <div className="absolute top-0 right-0 w-72 h-72 bg-brand/8 rounded-full blur-[80px] pointer-events-none" />
 
             <div className="relative z-10 flex flex-col md:flex-row items-center md:items-start gap-6">
-              {/* Avatar */}
               <div className="shrink-0">
                 {profile.avatarUrl ? (
                   <img
@@ -454,7 +382,6 @@ export default function Profile() {
                 )}
               </div>
 
-              {/* Info */}
               <div className="flex-1 text-center md:text-left flex flex-col items-center md:items-start">
                 <div className="flex items-center gap-3 mb-2">
                   <h1 className="text-2xl md:text-3xl font-extrabold text-text-heading">
@@ -474,7 +401,6 @@ export default function Profile() {
                   <p className="text-text-dim text-[14px] max-w-xl mb-4 leading-relaxed">{profile.bio}</p>
                 )}
 
-                {/* Stats bar */}
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 md:gap-6 text-[13px] text-text-main font-medium mb-6">
                   <StatItem value={folders.length} label="Hành trình" />
                   <div className="w-px h-8 bg-border-dim" />
@@ -485,7 +411,6 @@ export default function Profile() {
                   <StatItem value={uniqueCities} label="Thành phố" />
                 </div>
 
-                {/* Friend actions */}
                 {!isSelf && user && (
                   <div>
                     {friendship ? (
@@ -560,8 +485,6 @@ export default function Profile() {
   );
 }
 
-/* ===== Sub-components ===== */
-
 function StatItem({ value, label }: { value: number; label: string }) {
   return (
     <div className="flex flex-col items-center md:items-start">
@@ -610,11 +533,9 @@ function PhotosTab({ folders }: { folders: LocationFolder[] }) {
             </div>
           )}
 
-          {/* Overlay on hover */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent
             opacity-60 group-hover:opacity-90 transition-opacity duration-300" />
 
-          {/* Visibility badge */}
           <div className="absolute top-3 left-3 z-20">
             {folder.visibility === 'public' && (
               <span className="flex items-center gap-1 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded-md text-[9px] font-bold text-white/90 border border-white/10 uppercase tracking-wider">
@@ -628,7 +549,6 @@ function PhotosTab({ folders }: { folders: LocationFolder[] }) {
             )}
           </div>
 
-          {/* Folder info */}
           <div className="absolute bottom-0 left-0 right-0 p-3 z-20
             translate-y-1 group-hover:translate-y-0 transition-transform duration-300">
             <h3 className="text-[13px] font-bold text-white leading-tight mb-0.5 line-clamp-1">
@@ -658,9 +578,8 @@ function MapTab({ folders }: { folders: LocationFolder[] }) {
     );
   }
 
-  // Simple static map preview with pins
   return (
-    <div className="glass-card rounded-2xl overflow-hidden border border-border-dim">
+    <div className="glass-card rounded-2xl overflow-hidden border border-border-dim bg-bg-card/75">
       <div className="p-4 border-b border-border-dim flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-semibold text-text-heading">
           <Map className="w-4 h-4 text-brand" />
@@ -669,7 +588,6 @@ function MapTab({ folders }: { folders: LocationFolder[] }) {
         <span className="text-xs text-text-dim">{folders.length} địa điểm</span>
       </div>
 
-      {/* Map pins summary */}
       <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[400px] overflow-y-auto">
         {folders.map(folder => (
           <Link

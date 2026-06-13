@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
 import { MapPin, Image as ImageIcon, Users, Zap } from 'lucide-react';
+import { api } from '../lib/api';
 
 interface UserStats {
   totalLocations: number;
@@ -25,23 +24,11 @@ export function useUserStats(userId: string | undefined) {
     const fetchStats = async () => {
       setLoading(true);
       try {
-        // Get total locations
-        const foldersSnap = await getDocs(query(collection(db, 'folders'), where('uid', '==', userId)));
-        const totalLocations = foldersSnap.docs.length;
-
-        // Get total photos
-        const photosSnap = await getDocs(query(collection(db, 'photos'), where('uid', '==', userId)));
-        const totalPhotos = photosSnap.docs.length;
-
-        // Get total friends (accepted friendships)
-        const sentSnap = await getDocs(query(collection(db, 'friendships'), where('requesterId', '==', userId), where('status', '==', 'accepted')));
-        const receivedSnap = await getDocs(query(collection(db, 'friendships'), where('addresseeId', '==', userId), where('status', '==', 'accepted')));
-        const totalFriends = sentSnap.docs.length + receivedSnap.docs.length;
-
+        const res = await api.get<{ stats: any }>('/api/v1/dashboard/stats');
         setStats({
-          totalLocations,
-          totalPhotos,
-          totalFriends,
+          totalLocations: res.stats.totalLocations,
+          totalPhotos: res.stats.totalPhotos,
+          totalFriends: res.stats.totalFriends,
           totalDistance: 0
         });
       } catch (error) {

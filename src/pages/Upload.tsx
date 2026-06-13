@@ -2,9 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import exifr from 'exifr';
 import { UploadCloud, CheckCircle2, Image as ImageIcon, AlertCircle, MapPin, Navigation } from 'lucide-react';
-import { db, storage, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, where, getDocs, addDoc, updateDoc, doc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { useToast } from '../components/ToastContainer';
 import { findMatchingFolder } from '../lib/clustering';
@@ -52,7 +50,6 @@ function resizeImageToBlob(file: File, maxWidth: number, maxHeight: number): Pro
   });
 }
 
-// Also keep a base64 version for local preview only
 function resizeImageToDataUrl(file: File, maxWidth: number, maxHeight: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -83,18 +80,15 @@ function resizeImageToDataUrl(file: File, maxWidth: number, maxHeight: number): 
 
 async function uploadToStorage(userId: string, file: File, blob: Blob): Promise<string> {
   try {
-    const timestamp = Date.now();
-    const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const storageRef = ref(storage, `photos/${userId}/${timestamp}-${safeName}`);
-    await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
-    return await getDownloadURL(storageRef);
+    const name = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileToUpload = new File([blob], name, { type: 'image/jpeg' });
+    const res = await api.uploadPhoto(fileToUpload);
+    return res.url;
   } catch (err) {
-    console.warn('Firebase Storage upload failed, falling back to data URL:', err);
-    // Fallback to data URL if Storage upload fails (e.g. rules not yet deployed)
+    console.warn('API upload failed, falling back to data URL:', err);
     return await resizeImageToDataUrl(file, 800, 800);
   }
 }
-
 
 type ManualItem = { file?: File, url: string, name: string, takenAt: string };
 
@@ -113,11 +107,10 @@ function LocationMarker({ position, setPosition }: { position: {lat: number, lng
   const map = useMapEvents({
     click(e) {
       setPosition(e.latlng);
-      map.flyTo(e.latlng, map.getZoom(), { duration: 0.3 }); // Smooth transition
+      map.flyTo(e.latlng, map.getZoom(), { duration: 0.3 });
     },
   });
 
-  // Effect to fly to position if it is set externally (e.g. via GPS)
   useEffect(() => {
     if (position && map) {
       map.flyTo(position, 14, { duration: 0.5 });
@@ -143,11 +136,10 @@ export default function Upload() {
     if (!user) return;
     const fetchFolders = async () => {
       try {
-        const q = query(collection(db, 'folders'), where('uid', '==', user.uid));
-        const snap = await getDocs(q);
-        setFolders(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)));
+        const res = await api.get<{ folders: any[] }>('/api/v1/folders?limit=1000');
+        setFolders(res.folders);
       } catch (e) {
-        handleFirestoreError(e, OperationType.LIST, 'folders');
+        console.error('Failed to fetch folders:', e);
       }
     };
     fetchFolders();
@@ -159,27 +151,24 @@ export default function Upload() {
       const folder = folders.find(f => f.id === folderId);
       if (!folder) return;
       
-      await addDoc(collection(db, 'photos'), {
-        uid: user.uid,
+      await api.post('/api/v1/photos', {
         url: item.url,
         latitude: folder.centerLat,
         longitude: folder.centerLng,
         takenAt: item.takenAt,
-        uploadedAt: new Date().toISOString(),
         hasGps: true,
         folderId: folder.id
       });
 
-      await updateDoc(doc(db, 'folders', folder.id), {
-        photoCount: folder.photoCount + 1,
-        coverPhotoUrl: folder.coverPhotoUrl || item.url
-      });
+      if (!folder.coverPhotoUrl) {
+        await api.put(`/api/v1/folders/${folder.id}`, { coverPhotoUrl: item.url });
+      }
 
       setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, photoCount: f.photoCount + 1, coverPhotoUrl: f.coverPhotoUrl || item.url } as any : f));
 
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'photos/folders');
-      toast(`Failed to assign photo: ${item.name}`, 'error');
+      console.error(err);
+      toast(`Không thể gán ảnh: ${item.name}`, 'error');
     } finally {
       setManualQueue(prev => prev.filter(i => i.name !== item.name));
       setProgress(prev => ({ ...prev, [item.name]: 100 }));
@@ -188,7 +177,7 @@ export default function Upload() {
 
   const handleSkip = (item: ManualItem) => {
     setManualQueue(prev => prev.filter(i => i.name !== item.name));
-    setProgress(prev => ({ ...prev, [item.name]: -2 })); // -2 means skipped
+    setProgress(prev => ({ ...prev, [item.name]: -2 }));
   };
 
   const handleDateChange = (itemName: string, val: string) => {
@@ -197,7 +186,7 @@ export default function Upload() {
       const iso = new Date(val).toISOString();
       setManualQueue(prev => prev.map(i => i.name === itemName ? { ...i, takenAt: iso } : i));
     } catch (e) {
-      // ignore invalid dates
+      // ignore
     }
   };
 
@@ -214,43 +203,37 @@ export default function Upload() {
         const newLat = ((matchingFolder.centerLat * matchingFolder.photoCount) + lat) / newCount;
         const newLng = ((matchingFolder.centerLng * matchingFolder.photoCount) + lng) / newCount;
 
-        await updateDoc(doc(db, 'folders', matchingFolder.id), {
-          photoCount: newCount,
+        await api.put(`/api/v1/folders/${matchingFolder.id}`, {
           centerLat: newLat,
           centerLng: newLng,
           coverPhotoUrl: matchingFolder.coverPhotoUrl || pickingItem.url
         });
-        setFolders(prev => prev.map(f => f.id === matchingFolder.id ? {...f, photoCount: newCount, coverPhotoUrl: matchingFolder.coverPhotoUrl || pickingItem.url} as any : f));
+        setFolders(prev => prev.map(f => f.id === matchingFolder.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: matchingFolder.coverPhotoUrl || pickingItem.url} as any : f));
         folderId = matchingFolder.id;
       } else {
         const name = customLocationName.trim() || await reverseGeocode(lat, lng);
-        const newFolderRef = await addDoc(collection(db, 'folders'), {
-          uid: user.uid,
+        const newFolder = await api.post<any>('/api/v1/folders', {
           name,
           centerLat: lat,
           centerLng: lng,
-          photoCount: 1,
-          coverPhotoUrl: pickingItem.url,
-          createdAt: new Date().toISOString()
+          coverPhotoUrl: pickingItem.url
         });
-        folderId = newFolderRef.id;
+        folderId = newFolder.id;
         setFolders(prev => [...prev, { id: folderId, name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: pickingItem.url }]);
       }
 
-      await addDoc(collection(db, 'photos'), {
-        uid: user.uid,
+      await api.post('/api/v1/photos', {
         url: pickingItem.url,
         latitude: lat,
         longitude: lng,
         takenAt: pickingItem.takenAt,
-        uploadedAt: new Date().toISOString(),
         hasGps: true,
         folderId
       });
 
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'photos/folders');
-      toast('Failed to save location. Please try again.', 'error');
+      console.error(err);
+      toast('Không thể lưu vị trí. Vui lòng thử lại.', 'error');
     } finally {
       setManualQueue(prev => prev.filter(i => i.name !== pickingItem.name));
       setProgress(prev => ({ ...prev, [pickingItem.name]: 100 }));
@@ -264,7 +247,6 @@ export default function Upload() {
     if (!user) return;
     
     setProgress(prev => ({ ...prev, [file.name]: 10 }));
-    // Parse EXIF
     let lat = 0, lng = 0, takenAt = new Date().toISOString(), hasGps = false;
     try {
       const exifData = await exifr.parse(file, { gps: true, tiff: false, exif: true });
@@ -282,7 +264,6 @@ export default function Upload() {
 
     setProgress(prev => ({ ...prev, [file.name]: 40 }));
     
-    // Resize to blob then upload to Firebase Storage (with base64 fallback)
     const blob = await resizeImageToBlob(file, 1200, 1200);
     setProgress(prev => ({ ...prev, [file.name]: 60 }));
     
@@ -292,77 +273,57 @@ export default function Upload() {
 
     if (!hasGps) {
       setManualQueue(prev => [...prev, { file, url, name: file.name, takenAt }]);
-      setProgress(prev => ({ ...prev, [file.name]: -1 })); // -1 means wait for manual queue
+      setProgress(prev => ({ ...prev, [file.name]: -1 }));
       return;
     }
 
-    // Load user's folders to find a match
-    let foldersSnapshot;
-    try {
-      const q = query(collection(db, 'folders'), where('uid', '==', user.uid));
-      foldersSnapshot = await getDocs(q);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'folders');
-      return;
-    }
-    const serverFolders = foldersSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    let matchingFolder = findMatchingFolder(lat, lng, serverFolders);
+    let matchingFolder = findMatchingFolder(lat, lng, folders);
 
     try {
       if (matchingFolder) {
-        // Update existing folder
         const newCount = matchingFolder.photoCount + 1;
         const newLat = ((matchingFolder.centerLat * matchingFolder.photoCount) + lat) / newCount;
         const newLng = ((matchingFolder.centerLng * matchingFolder.photoCount) + lng) / newCount;
 
-        await updateDoc(doc(db, 'folders', matchingFolder.id), {
-          photoCount: newCount,
+        await api.put(`/api/v1/folders/${matchingFolder.id}`, {
           centerLat: newLat,
           centerLng: newLng,
           coverPhotoUrl: matchingFolder.coverPhotoUrl || url
         });
-        setFolders(prev => prev.some(f => f.id === matchingFolder.id) ? prev.map(f => f.id === matchingFolder.id ? {...f, photoCount: newCount, coverPhotoUrl: matchingFolder.coverPhotoUrl || url} as any : f) : prev);
+        setFolders(prev => prev.map(f => f.id === matchingFolder.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: matchingFolder.coverPhotoUrl || url} as any : f));
       } else {
-        // Create new folder
         const name = await reverseGeocode(lat, lng);
-        const newFolderRef = await addDoc(collection(db, 'folders'), {
-          uid: user.uid,
+        const newFolder = await api.post<any>('/api/v1/folders', {
           name,
           centerLat: lat,
           centerLng: lng,
-          photoCount: 1,
-          coverPhotoUrl: url,
-          createdAt: new Date().toISOString()
+          coverPhotoUrl: url
         });
-        matchingFolder = { id: newFolderRef.id };
-        setFolders(prev => [...prev, { id: newFolderRef.id, name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: url }]);
+        matchingFolder = { id: newFolder.id, photoCount: 1, centerLat: lat, centerLng: lng, coverPhotoUrl: url };
+        setFolders(prev => [...prev, { id: newFolder.id, name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: url }]);
       }
 
-      // Add photo
-      await addDoc(collection(db, 'photos'), {
-        uid: user.uid,
+      await api.post('/api/v1/photos', {
         url,
         latitude: lat,
         longitude: lng,
         takenAt,
-        uploadedAt: new Date().toISOString(),
         hasGps: true,
         folderId: matchingFolder.id
       });
 
       setProgress(prev => ({ ...prev, [file.name]: 100 }));
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'photos/folders');
-      toast(`Failed to upload ${file.name}`, 'error');
-      setProgress(prev => ({ ...prev, [file.name]: -2 })); // mark as skipped on error
+      console.error(err);
+      toast(`Không thể tải lên ${file.name}`, 'error');
+      setProgress(prev => ({ ...prev, [file.name]: -2 }));
     }
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
     setUploading(true);
-    setStatusText(`Processing ${acceptedFiles.length} photos...`);
+    setStatusText(`Đang xử lý ${acceptedFiles.length} bức ảnh...`);
 
     const initialProgress = acceptedFiles.reduce((acc, file) => {
       acc[file.name] = 0;
@@ -372,16 +333,16 @@ export default function Upload() {
 
     try {
       await Promise.all(acceptedFiles.map(processFile));
-      setStatusText('All photos uploaded successfully!');
-      toast(`Successfully uploaded ${acceptedFiles.length} photo(s)`, 'success');
+      setStatusText('Tải lên hoàn tất!');
+      toast(`Tải lên thành công ${acceptedFiles.length} ảnh`, 'success');
     } catch (e) {
       console.error(e);
-      setStatusText('Error uploading photos. Check console.');
-      toast('Error uploading photos', 'error');
+      setStatusText('Có lỗi xảy ra khi tải ảnh lên.');
+      toast('Có lỗi khi tải ảnh lên', 'error');
     } finally {
       setUploading(false);
     }
-  }, [user]);
+  }, [user, folders]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

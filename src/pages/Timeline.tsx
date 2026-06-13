@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { collection, query, where, orderBy, onSnapshot, doc, deleteDoc, updateDoc, addDoc, getDocs, limit, startAfter, QueryDocumentSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { LocationFolder } from '../types';
 import { useToast } from '../components/ToastContainer';
@@ -8,9 +7,9 @@ import { TimelineSkeleton } from '../components/LoadingSkeleton';
 import { LazyImagePlaceholder } from '../components/LazyImage';
 import { SearchBox, FolderSearchFilter } from '../components/SearchBox';
 import { UserStatsGrid } from '../components/StatsCard';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { MoreVertical, Edit2, Trash2, MapPin, Plus, Globe, Users, Lock, Loader2 } from 'lucide-react';
+import { MoreVertical, Edit2, Trash2, Globe, Users, Lock, Loader2, Plus } from 'lucide-react';
 
 const PAGE_SIZE = 12;
 
@@ -22,7 +21,7 @@ export default function Timeline() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -36,57 +35,44 @@ export default function Timeline() {
     if (!user || loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const baseQuery = query(
-        collection(db, 'folders'),
-        where('uid', '==', user.uid),
-        orderBy('createdAt', 'desc'),
-        limit(PAGE_SIZE),
-        ...(lastDoc ? [startAfter(lastDoc)] : [])
+      const res = await api.get<{ folders: LocationFolder[]; nextCursor: string | null }>(
+        `/api/v1/folders?limit=${PAGE_SIZE}&cursor=${nextCursor}`
       );
-      const snapshot = await getDocs(baseQuery);
-      const newFolders = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as LocationFolder));
       setFolders(prev => {
         const existingIds = new Set(prev.map(f => f.id));
-        return [...prev, ...newFolders.filter(f => !existingIds.has(f.id!))]
+        return [...prev, ...res.folders.filter(f => !existingIds.has(f.id!))];
       });
-      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
-      setHasMore(snapshot.docs.length === PAGE_SIZE);
+      setNextCursor(res.nextCursor);
+      setHasMore(res.nextCursor !== null);
     } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'folders');
+      console.error('Failed to load more folders:', err);
+      toast('Không thể tải thêm địa điểm', 'error');
     } finally {
       setLoadingMore(false);
     }
-  }, [user, loadingMore, hasMore, lastDoc]);
+  }, [user, loadingMore, hasMore, nextCursor, toast]);
 
   useEffect(() => {
     if (!user) return;
-    setLoading(true);
-    setFolders([]);
-    setLastDoc(null);
-    setHasMore(true);
+    const fetchInitial = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get<{ folders: LocationFolder[]; nextCursor: string | null }>(
+          `/api/v1/folders?limit=${PAGE_SIZE}`
+        );
+        setFolders(res.folders);
+        setNextCursor(res.nextCursor);
+        setHasMore(res.nextCursor !== null);
+      } catch (err) {
+        console.error('Failed to load initial folders:', err);
+        toast('Không thể tải danh sách hành trình', 'error');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    // Initial load with realtime updates for first page
-    const q = query(
-      collection(db, 'folders'),
-      where('uid', '==', user.uid),
-      orderBy('createdAt', 'desc'),
-      limit(PAGE_SIZE)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LocationFolder));
-      setFolders(data);
-      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
-      setHasMore(snapshot.docs.length === PAGE_SIZE);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'folders');
-      toast('Failed to load timeline', 'error');
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
+    fetchInitial();
+  }, [user, toast]);
 
   // Intersection Observer for infinite scroll
   useEffect(() => {
@@ -105,30 +91,23 @@ export default function Timeline() {
   const handleDelete = async (e: React.MouseEvent, folder: LocationFolder) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this folder and all its photos?')) return;
+    if (!window.confirm('Bạn có chắc chắn muốn xóa địa điểm này cùng tất cả ảnh bên trong?')) return;
 
     try {
-      // First, get all photos in this folder
-      const q = query(collection(db, 'photos'), where('uid', '==', user!.uid));
-      const snapshot = await getDocs(q);
-      const docsToDelete = snapshot.docs.filter(d => d.data().folderId === folder.id);
-
-      // Delete photos
-      await Promise.all(docsToDelete.map(d => deleteDoc(doc(db, 'photos', d.id))));
-      // Delete folder itself
-      await deleteDoc(doc(db, 'folders', folder.id));
+      await api.delete(`/api/v1/folders/${folder.id}`);
+      setFolders(prev => prev.filter(f => f.id !== folder.id));
       setActionMenuId(null);
-      toast('Folder deleted successfully', 'success');
+      toast('Đã xóa địa điểm thành công', 'success');
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, 'folders/photos');
-      toast('Failed to delete folder', 'error');
+      console.error('Failed to delete folder:', err);
+      toast('Không thể xóa địa điểm', 'error');
     }
   };
 
   const handleEdit = (e: React.MouseEvent, folder: LocationFolder) => {
     e.preventDefault();
     e.stopPropagation();
-    setEditingId(folder.id);
+    setEditingId(folder.id || null);
     setEditName(folder.name);
     setActionMenuId(null);
   };
@@ -139,14 +118,15 @@ export default function Timeline() {
     if (!editName.trim()) return;
 
     try {
-      await updateDoc(doc(db, 'folders', folder.id), {
+      const updated = await api.put<LocationFolder>(`/api/v1/folders/${folder.id}`, {
         name: editName.trim()
       });
+      setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, name: updated.name } : f));
       setEditingId(null);
-      toast('Folder renamed successfully', 'success');
+      toast('Đã đổi tên địa điểm thành công', 'success');
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, 'folders');
-      toast('Failed to rename folder', 'error');
+      console.error('Failed to rename folder:', err);
+      toast('Không thể đổi tên địa điểm', 'error');
     }
   };
 
@@ -155,20 +135,18 @@ export default function Timeline() {
     if (!newName.trim() || !user) return;
 
     try {
-      await addDoc(collection(db, 'folders'), {
-        uid: user.uid,
+      const created = await api.post<LocationFolder>('/api/v1/folders', {
         name: newName.trim(),
         centerLat: 10.8231, // Default lat
         centerLng: 106.6297, // Default lng
-        photoCount: 0,
-        createdAt: new Date().toISOString()
       });
+      setFolders(prev => [created, ...prev]);
       setIsAdding(false);
       setNewName('');
-      toast('Folder created successfully', 'success');
+      toast('Đã tạo địa điểm mới thành công', 'success');
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'folders');
-      toast('Failed to create folder', 'error');
+      console.error('Failed to create folder:', err);
+      toast('Không thể tạo địa điểm mới', 'error');
     }
   };
 
@@ -318,10 +296,10 @@ export default function Timeline() {
                       </div>
                     </div>
                   </Link>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))
+            ))
           )}
         </div>
       )}

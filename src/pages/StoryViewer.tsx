@@ -1,21 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { X, ChevronLeft, ChevronRight, Trash2, Volume2, VolumeX } from 'lucide-react';
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  getDoc,
-  query,
-  where,
-} from 'firebase/firestore';
-import { db } from '../firebase';
+import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { Post, UserProfile } from '../types';
 import { useToast } from '../components/ToastContainer';
-
-// ─── Types ───────────────────────────────────────────────────────
 
 type StoryWithProfile = Post & { userProfile?: UserProfile };
 
@@ -23,8 +12,6 @@ interface LocationState {
   storyIndex?: number;
   stories?: StoryWithProfile[];
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -36,12 +23,10 @@ function formatRelativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)} ngày trước`;
 }
 
-// ─── Progress Bar ─────────────────────────────────────────────────
-
 interface ProgressBarProps {
   count: number;
   current: number;
-  duration: number; // ms
+  duration: number;
   playing: boolean;
   onComplete: () => void;
 }
@@ -101,9 +86,7 @@ function ProgressBars({ count, current, duration, playing, onComplete }: Progres
   );
 }
 
-// ─── StoryViewer ──────────────────────────────────────────────────
-
-const STORY_DURATION = 5_000; // 5 seconds
+const STORY_DURATION = 5_000;
 
 export default function StoryViewer() {
   const location = useLocation();
@@ -113,7 +96,6 @@ export default function StoryViewer() {
 
   const state = location.state as LocationState | null;
 
-  // ── State ──
   const [stories, setStories] = useState<StoryWithProfile[]>(
     state?.stories ?? [],
   );
@@ -122,58 +104,36 @@ export default function StoryViewer() {
   );
   const [loadingStories, setLoadingStories] = useState(!state?.stories?.length);
   const [paused, setPaused] = useState(false);
-  const [muted, setMuted] = useState(true); // placeholder for future video
+  const [muted, setMuted] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
   const currentStory = stories[currentIndex];
   const isOwn = user?.uid === currentStory?.uid;
 
-  // ── Fetch stories from Firestore if not passed via state ──
   useEffect(() => {
     if (state?.stories?.length) return;
 
     const fetchStories = async () => {
       setLoadingStories(true);
       try {
-        const now = new Date().toISOString();
-        const snap = await getDocs(
-          query(
-            collection(db, 'posts'),
-            where('type', '==', 'story'),
-          ),
-        );
+        const res = await api.get<{ stories: any[] }>('/api/v1/posts/stories');
+        const enriched: StoryWithProfile[] = res.stories.map(story => {
+          const userProfile: UserProfile = story.user ? {
+            uid: story.user.uid,
+            displayName: story.user.displayName,
+            avatarUrl: story.user.avatarUrl,
+            email: '',
+            role: 'user',
+            createdAt: ''
+          } : { uid: story.uid, email: '', role: 'user', createdAt: '' };
 
-        const raw: Post[] = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as Post))
-          .filter(
-            (p) =>
-              p.expiresAt &&
-              p.expiresAt > now &&
-              (p.visibility === 'public' || p.visibility === 'friends'),
-          );
-
-        // Enrich with user profiles
-        const profileCache: Record<string, UserProfile> = {};
-        const enriched: StoryWithProfile[] = await Promise.all(
-          raw.map(async (story) => {
-            if (!profileCache[story.uid]) {
-              try {
-                const snap2 = await getDoc(doc(db, 'users', story.uid));
-                profileCache[story.uid] = snap2.exists()
-                  ? ({ uid: snap2.id, ...snap2.data() } as UserProfile)
-                  : ({ uid: story.uid, email: '' } as UserProfile);
-              } catch {
-                profileCache[story.uid] = { uid: story.uid, email: '' } as UserProfile;
-              }
-            }
-            return { ...story, userProfile: profileCache[story.uid] };
-          }),
-        );
+          return { ...story, userProfile };
+        });
 
         setStories(enriched);
-      } catch (e: unknown) {
-        const err = e as { message?: string };
-        toast('Không thể tải tin: ' + (err.message ?? 'Lỗi không xác định'), 'error');
+      } catch (e: any) {
+        console.error(e);
+        toast('Không thể tải tin: ' + (e.message || 'Lỗi kết nối'), 'error');
       } finally {
         setLoadingStories(false);
       }
@@ -182,7 +142,6 @@ export default function StoryViewer() {
     fetchStories();
   }, [state?.stories, toast]);
 
-  // ── Navigation ──
   const goNext = useCallback(() => {
     if (currentIndex < stories.length - 1) {
       setCurrentIndex((i) => i + 1);
@@ -197,7 +156,6 @@ export default function StoryViewer() {
     }
   }, [currentIndex]);
 
-  // ── Keyboard navigation ──
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') goNext();
@@ -209,10 +167,8 @@ export default function StoryViewer() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [goNext, goPrev, navigate]);
 
-  // ── Tap handler ──
   const handleTap = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      // Ignore taps on interactive children (buttons)
       if ((e.target as HTMLElement).closest('button')) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const relX = e.clientX - rect.left;
@@ -225,13 +181,12 @@ export default function StoryViewer() {
     [goPrev, goNext],
   );
 
-  // ── Delete story ──
   const handleDelete = async () => {
     if (!currentStory?.id) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, 'posts', currentStory.id));
-      toast('Đã xóa tin', 'success');
+      await api.delete(`/api/v1/posts/${currentStory.id}`);
+      toast('Đã xóa tin thành công', 'success');
       const updated = stories.filter((_, i) => i !== currentIndex);
       if (updated.length === 0) {
         navigate(-1);
@@ -239,15 +194,14 @@ export default function StoryViewer() {
         setStories(updated);
         setCurrentIndex(Math.min(currentIndex, updated.length - 1));
       }
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      toast('Lỗi khi xóa: ' + (err.message ?? ''), 'error');
+    } catch (e: any) {
+      console.error(e);
+      toast('Lỗi khi xóa tin: ' + (e.message || 'Vui lòng thử lại'), 'error');
     } finally {
       setDeleting(false);
     }
   };
 
-  // ── Loading state ──
   if (loadingStories) {
     return (
       <div className="fixed inset-0 z-[1000] bg-black flex items-center justify-center">
@@ -271,18 +225,14 @@ export default function StoryViewer() {
   }
 
   const prof = currentStory.userProfile;
-  const initial =
-    prof?.displayName?.charAt(0).toUpperCase() ?? '?';
+  const initial = prof?.displayName?.charAt(0).toUpperCase() ?? '?';
 
   return (
     <div
       className="fixed inset-0 z-[1000] bg-black flex items-center justify-center select-none"
       onClick={handleTap}
     >
-      {/* ── Story Image Container ── */}
       <div className="relative w-full h-full md:w-[390px] md:h-[calc(100vh-40px)] md:my-5 md:rounded-3xl overflow-hidden bg-black shadow-2xl">
-
-        {/* Background blurred image */}
         <div
           className="absolute inset-0 scale-110 blur-xl opacity-40 pointer-events-none"
           style={{
@@ -292,7 +242,6 @@ export default function StoryViewer() {
           }}
         />
 
-        {/* Main story image */}
         <img
           key={currentStory.id}
           src={currentStory.imageUrls[0]}
@@ -301,15 +250,10 @@ export default function StoryViewer() {
           draggable={false}
         />
 
-        {/* ── Gradient overlays ── */}
-        {/* Top */}
         <div className="absolute top-0 inset-x-0 h-40 bg-gradient-to-b from-black/70 via-black/30 to-transparent z-[2] pointer-events-none" />
-        {/* Bottom */}
         <div className="absolute bottom-0 inset-x-0 h-32 bg-gradient-to-t from-black/80 via-black/40 to-transparent z-[2] pointer-events-none" />
 
-        {/* ── Top UI ── */}
         <div className="absolute top-0 inset-x-0 z-[10] px-3 pt-3 pb-2 space-y-3">
-          {/* Progress bars */}
           <ProgressBars
             count={stories.length}
             current={currentIndex}
@@ -318,10 +262,8 @@ export default function StoryViewer() {
             onComplete={goNext}
           />
 
-          {/* Header row */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              {/* Avatar */}
               <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-white/50 shadow-md shrink-0">
                 {prof?.avatarUrl ? (
                   <img
@@ -335,7 +277,6 @@ export default function StoryViewer() {
                   </div>
                 )}
               </div>
-              {/* Name & time */}
               <div className="flex flex-col min-w-0">
                 <span className="text-white font-semibold text-[13px] leading-tight truncate max-w-[160px]">
                   {prof?.displayName ?? 'Người dùng'}
@@ -346,9 +287,7 @@ export default function StoryViewer() {
               </div>
             </div>
 
-            {/* Action buttons */}
             <div className="flex items-center gap-1">
-              {/* Mute toggle (decorative – useful for future video stories) */}
               <button
                 onClick={(e) => { e.stopPropagation(); setMuted((m) => !m); }}
                 className="p-2 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-sm transition-all"
@@ -357,7 +296,6 @@ export default function StoryViewer() {
                 {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
 
-              {/* Delete button (own stories) */}
               {isOwn && (
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(); }}
@@ -373,7 +311,6 @@ export default function StoryViewer() {
                 </button>
               )}
 
-              {/* Close */}
               <button
                 onClick={(e) => { e.stopPropagation(); navigate(-1); }}
                 className="p-2 rounded-full bg-black/30 hover:bg-black/50 text-white backdrop-blur-sm transition-all"
@@ -385,7 +322,6 @@ export default function StoryViewer() {
           </div>
         </div>
 
-        {/* ── Story Caption ── */}
         {currentStory.content && (
           <div className="absolute bottom-6 inset-x-4 z-[10] flex justify-center">
             <p className="bg-black/60 backdrop-blur-md text-white px-4 py-2.5 rounded-2xl text-sm font-medium text-center max-w-xs shadow-lg">
@@ -394,7 +330,6 @@ export default function StoryViewer() {
           </div>
         )}
 
-        {/* ── Tap pause indicator ── */}
         {paused && (
           <div className="absolute inset-0 z-[5] flex items-center justify-center pointer-events-none">
             <div className="w-16 h-16 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
@@ -407,7 +342,6 @@ export default function StoryViewer() {
         )}
       </div>
 
-      {/* ── Desktop side navigation ── */}
       {currentIndex > 0 && (
         <button
           onClick={(e) => { e.stopPropagation(); goPrev(); }}
@@ -428,7 +362,6 @@ export default function StoryViewer() {
         </button>
       )}
 
-      {/* ── Mobile: hold to pause ── */}
       <div
         className="absolute inset-0 z-[8] pointer-events-auto md:hidden"
         onPointerDown={(e) => { e.stopPropagation(); setPaused(true); }}

@@ -88,8 +88,6 @@ export default defineConfig(({mode}) => {
         output: {
           manualChunks: {
             'react-core': ['react', 'react-dom', 'react-router-dom'],
-            'firebase-core': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-            'firebase-storage': ['firebase/storage'],
             'map-libs': ['leaflet', 'react-leaflet'],
             'motion': ['motion'],
             'ui-utils': ['lucide-react', 'clsx', 'tailwind-merge', 'date-fns'],

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { collection, query, where, getDocs, addDoc, doc, getDoc } from 'firebase/firestore';
-import { db, auth } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { UserProfile, Friendship } from '../types';
+import { api } from '../lib/api';
+import { useAppStore } from '../store/useAppStore';
+import { UserProfile } from '../types';
 
 type PageState = 'loading' | 'found' | 'not-found' | 'already-friends' | 'pending' | 'self' | 'sent';
 
@@ -12,56 +11,42 @@ export default function InvitePage() {
   const navigate = useNavigate();
   const [state, setState] = useState<PageState>('loading');
   const [inviter, setInviter] = useState<UserProfile | null>(null);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const { user } = useAppStore();
   const [sending, setSending] = useState(false);
 
-  // Listen to auth state
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setCurrentUser(u));
-    return () => unsub();
-  }, []);
-
-  // Fetch inviter by invite code
+  // Fetch inviter by invite code and check friendship
   useEffect(() => {
     if (!code) { setState('not-found'); return; }
-    const fetchInviter = async () => {
+    
+    const fetchInviterAndStatus = async () => {
       try {
-        const q = query(collection(db, 'users'), where('inviteCode', '==', code));
-        const snap = await getDocs(q);
-        if (snap.empty) { setState('not-found'); return; }
-        const data = { uid: snap.docs[0].id, ...snap.docs[0].data() } as UserProfile;
-        setInviter(data);
+        const inviterData = await api.get<UserProfile>(`/api/v1/users?inviteCode=${code}`);
+        setInviter(inviterData);
 
-        if (currentUser) {
-          if (currentUser.uid === data.uid) { setState('self'); return; }
+        if (user) {
+          if (user.uid === inviterData.uid) { setState('self'); return; }
+          
           // Check existing friendship
-          const [sent, received] = await Promise.all([
-            getDocs(query(collection(db, 'friendships'),
-              where('requesterId', '==', currentUser.uid),
-              where('addresseeId', '==', data.uid))),
-            getDocs(query(collection(db, 'friendships'),
-              where('requesterId', '==', data.uid),
-              where('addresseeId', '==', currentUser.uid))),
-          ]);
-          const existing = [...sent.docs, ...received.docs];
-          if (existing.length > 0) {
-            const status = existing[0].data().status;
+          const res = await api.get<{ friendship: any }>(`/api/v1/friendships/status?userId=${inviterData.uid}`);
+          if (res.friendship) {
+            const status = res.friendship.status;
             setState(status === 'accepted' ? 'already-friends' : 'pending');
             return;
           }
         }
         setState('found');
       } catch (e) {
-        console.error(e);
+        console.error('Failed to lookup invite details:', e);
         setState('not-found');
       }
     };
-    fetchInviter();
-  }, [code, currentUser]);
+
+    fetchInviterAndStatus();
+  }, [code, user]);
 
   const handleSendRequest = async () => {
     if (!inviter) return;
-    if (!currentUser) {
+    if (!user) {
       // Save intent and redirect to login
       sessionStorage.setItem('pendingInviteCode', code || '');
       navigate('/login');
@@ -69,25 +54,10 @@ export default function InvitePage() {
     }
     setSending(true);
     try {
-      await addDoc(collection(db, 'friendships'), {
-        requesterId: currentUser.uid,
-        addresseeId: inviter.uid,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-      // Create notification for inviter
-      await addDoc(collection(db, 'notifications'), {
-        recipientId: inviter.uid,
-        actorId: currentUser.uid,
-        type: 'friend_request',
-        entityId: inviter.uid,
-        isRead: false,
-        createdAt: new Date().toISOString(),
-      });
+      await api.post('/api/v1/friendships', { addresseeId: inviter.uid });
       setState('sent');
     } catch (e) {
-      console.error(e);
+      console.error('Failed to send friend request:', e);
     } finally {
       setSending(false);
     }
@@ -182,7 +152,7 @@ export default function InvitePage() {
                   >
                     {sending ? 'Đang gửi...' : `Kết bạn với ${inviterName}`}
                   </button>
-                  {!currentUser && (
+                  {!user && (
                     <p className="text-text-dim text-[12px] mt-3">Bạn sẽ được yêu cầu đăng nhập hoặc đăng ký</p>
                   )}
                 </>

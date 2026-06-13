@@ -4,8 +4,7 @@ import { Link } from 'react-router-dom';
 import { FeedItem, Comment } from '../../types';
 import { timeAgo } from '../../lib/utils';
 import { useAppStore } from '../../store/useAppStore';
-import { collection, query, where, getDocs, addDoc, orderBy, limit, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { api } from '../../lib/api';
 import { useToast } from '../ToastContainer';
 import { useLightbox } from '../Lightbox';
 
@@ -152,15 +151,9 @@ export function PostItem({ item, handleReaction }: PostItemProps) {
   const fetchComments = useCallback(async () => {
     setLoadingComments(true);
     try {
-      const field = item.type === 'post' ? 'postId' : 'folderId';
-      const q = query(
-        collection(db, 'comments'),
-        where(field, '==', item.id),
-        orderBy('createdAt', 'desc'),
-        limit(10)
-      );
-      const snap = await getDocs(q);
-      setComments(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Comment)).reverse());
+      const param = item.type === 'post' ? `postId=${item.id}` : `folderId=${item.id}`;
+      const res = await api.get<{ comments: Comment[] }>(`/api/v1/comments?${param}`);
+      setComments(res.comments);
     } catch (e) {
       console.error(e);
     } finally {
@@ -177,34 +170,27 @@ export function PostItem({ item, handleReaction }: PostItemProps) {
     if (!newComment.trim() || !user) return;
 
     try {
-      const commentData = {
-        uid: user.uid,
+      const body = {
         ...(item.type === 'post' ? { postId: item.id } : { folderId: item.id }),
         content: newComment.trim(),
-        userProfile: {
-          displayName: user.displayName,
-          avatarUrl: user.photoURL,
-          email: user.email,
-        },
-        createdAt: new Date().toISOString(),
       };
-      const docRef = await addDoc(collection(db, 'comments'), commentData);
-      setComments((prev) => [...prev, { id: docRef.id, ...commentData }]);
+      const res = await api.post<Comment>(`/api/v1/comments`, body);
+      setComments((prev) => [...prev, res]);
       setNewComment('');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast('Không thể đăng bình luận', 'error');
+      toast('Không thể đăng bình luận: ' + (e?.message || 'Unknown error'), 'error');
     }
   };
 
   const handleDeleteComment = async (commentId: string) => {
     try {
-      await deleteDoc(doc(db, 'comments', commentId));
+      await api.delete(`/api/v1/comments/${commentId}`);
       setComments((prev) => prev.filter((c) => c.id !== commentId));
       toast('Bình luận đã được xoá', 'success');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast('Không thể xoá bình luận', 'error');
+      toast('Không thể xoá bình luận: ' + (e?.message || 'Unknown error'), 'error');
     }
   };
 
@@ -452,8 +438,8 @@ export function PostItem({ item, handleReaction }: PostItemProps) {
           {/* Comment form – always visible */}
           <div className="px-4 pt-3 pb-2">
             <form onSubmit={handlePostComment} className="flex items-center gap-2">
-              {user?.photoURL ? (
-                <img src={user.photoURL} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-border-dim" />
+              {user?.avatarUrl ? (
+                <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-border-dim" />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-brand/20 border border-brand/30 flex items-center justify-center text-brand font-bold shrink-0 text-xs">
                   {(user?.displayName ?? '?').charAt(0).toUpperCase()}

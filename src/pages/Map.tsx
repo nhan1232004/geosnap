@@ -2,8 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { useToast } from '../components/ToastContainer';
 import { LocationFolder, UserProfile } from '../types';
@@ -54,7 +53,6 @@ const createClusterIcon = (count: number) => {
   });
 };
 
-// Sub-component to track zoom level in react-leaflet
 function MapEventsTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
   const map = useMapEvents({
     zoomend() {
@@ -79,13 +77,12 @@ export default function MapViewPage() {
     if (!user) return;
     const fetchMine = async () => {
       try {
-        const q = query(collection(db, 'folders'), where('uid', '==', user.uid));
-        const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as LocationFolder, isMine: true }));
+        const res = await api.get<{ folders: LocationFolder[] }>('/api/v1/folders?limit=1000');
+        const data = res.folders.map(folder => ({ ...folder, isMine: true }));
         setMyFolders(data);
       } catch (e) {
-        handleFirestoreError(e, OperationType.LIST, 'folders');
-        toast('Failed to load your locations', 'error');
+        console.error('Failed to load my folders:', e);
+        toast('Không thể tải dữ liệu bản đồ cá nhân', 'error');
       } finally {
         setLoading(false);
       }
@@ -97,45 +94,20 @@ export default function MapViewPage() {
   const fetchFriendFolders = useCallback(async () => {
     if (!user) return;
     try {
-      const [sentSnap, receivedSnap] = await Promise.all([
-        getDocs(query(collection(db, 'friendships'), where('requesterId', '==', user.uid), where('status', '==', 'accepted'))),
-        getDocs(query(collection(db, 'friendships'), where('addresseeId', '==', user.uid), where('status', '==', 'accepted')))
-      ]);
-
-      const friendIds = [
-        ...sentSnap.docs.map(d => d.data().addresseeId),
-        ...receivedSnap.docs.map(d => d.data().requesterId)
-      ];
-
-      if (friendIds.length === 0) return;
-
-      const batches = [];
-      for (let i = 0; i < friendIds.length; i += 10) {
-        const chunk = friendIds.slice(i, i + 10);
-        batches.push(getDocs(query(collection(db, 'folders'), where('uid', 'in', chunk), where('visibility', 'in', ['friends', 'public']))));
-      }
-
-      const snapshots = await Promise.all(batches);
-      let folders: LocationFolder[] = [];
-      snapshots.forEach(snap => folders = [...folders, ...snap.docs.map(d => ({ id: d.id, ...d.data() } as LocationFolder))]);
-
-      const profileCache: Record<string, UserProfile> = {};
-      const enriched = await Promise.all(folders.map(async (folder) => {
-        if (!profileCache[folder.uid]) {
-          const profileSnap = await getDoc(doc(db, 'users', folder.uid));
-          if (profileSnap.exists()) profileCache[folder.uid] = { uid: profileSnap.id, ...profileSnap.data() } as UserProfile;
-        }
-        return {
-          ...folder,
-          isMine: false,
-          userProfile: profileCache[folder.uid]
-        };
+      const res = await api.get<{ folders: any[] }>('/api/v1/folders/friends');
+      const enriched = res.folders.map(folder => ({
+        ...folder,
+        isMine: false,
+        userProfile: folder.user ? {
+          uid: folder.user.id,
+          displayName: folder.user.displayName,
+          avatarUrl: folder.user.avatarUrl
+        } : undefined
       }));
-
       setFriendFolders(enriched);
     } catch (e) {
       console.error(e);
-      toast('Failed to load friends\' locations', 'error');
+      toast('Không thể tải hành trình của bạn bè', 'error');
     }
   }, [user, toast]);
 
@@ -147,7 +119,6 @@ export default function MapViewPage() {
 
   const rawDisplayedFolders = showFriends ? [...myFolders, ...friendFolders] : myFolders;
 
-  // 1. Time filtering logic
   const displayedFolders = useMemo(() => {
     const now = new Date();
     return rawDisplayedFolders.filter(folder => {
@@ -163,7 +134,6 @@ export default function MapViewPage() {
     });
   }, [rawDisplayedFolders, timeFilter]);
 
-  // 2. Custom responsive grid clustering logic based on Map zoom
   const clusterDistanceThreshold = useMemo(() => {
     if (zoom <= 3) return 5.0;
     if (zoom === 4) return 3.0;
@@ -171,7 +141,7 @@ export default function MapViewPage() {
     if (zoom === 6) return 0.8;
     if (zoom === 7) return 0.4;
     if (zoom === 8) return 0.2;
-    return 0.0; // Disable clustering at zoom 9+
+    return 0.0;
   }, [zoom]);
 
   const clusters = useMemo(() => {
@@ -191,7 +161,6 @@ export default function MapViewPage() {
           const dist = Math.sqrt(dLat * dLat + dLng * dLng);
           if (dist < clusterDistanceThreshold) {
             cluster.folders.push(folder);
-            // Re-average cluster center coordinates
             cluster.centerLat = cluster.folders.reduce((sum, f) => sum + f.centerLat, 0) / cluster.folders.length;
             cluster.centerLng = cluster.folders.reduce((sum, f) => sum + f.centerLng, 0) / cluster.folders.length;
             added = true;
@@ -253,7 +222,6 @@ export default function MapViewPage() {
 
         {/* Source Toggle */}
         <div className="space-y-2">
-          {/* My Map Toggle */}
           <button 
             onClick={() => setShowFriends(false)}
             className={`w-full flex items-center justify-between p-3 rounded-2xl transition-all ${
@@ -272,7 +240,6 @@ export default function MapViewPage() {
             {!showFriends && <div className="w-1.5 h-1.5 rounded-full bg-brand"></div>}
           </button>
 
-          {/* Friends Map Toggle */}
           <button 
             onClick={() => setShowFriends(true)}
             className={`w-full flex items-center justify-between p-3 rounded-2xl transition-all ${
@@ -301,6 +268,7 @@ export default function MapViewPage() {
       >
         <MapEventsTracker onZoomChange={setZoom} />
         <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
         

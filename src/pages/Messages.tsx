@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { collection, query, where, getDocs, orderBy, limit, addDoc, deleteDoc, doc, onSnapshot, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { useToast } from '../components/ToastContainer';
 import { Send, Trash2, ArrowLeft, UserPlus } from 'lucide-react';
 import { timeAgo } from '../lib/utils';
+import { api } from '../lib/api';
+import { getSocket, joinConversation, leaveConversation } from '../lib/socket';
 
 interface Message {
   id: string;
@@ -59,82 +59,36 @@ export default function Messages() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        console.log('Fetching friendships for user:', user.uid);
-
-        // Get all friends
-        const [sentSnap, receivedSnap] = await Promise.all([
-          getDocs(query(collection(db, 'friendships'), where('requesterId', '==', user.uid), where('status', '==', 'accepted'))),
-          getDocs(query(collection(db, 'friendships'), where('addresseeId', '==', user.uid), where('status', '==', 'accepted')))
+        const [friendsRes, convosRes] = await Promise.all([
+          api.get<{ friendships: any[] }>('/api/v1/friendships'),
+          api.get<{ conversations: any[] }>('/api/v1/messages/conversations')
         ]);
 
-        const friendIds = [
-          ...sentSnap.docs.map(d => d.data().addresseeId),
-          ...receivedSnap.docs.map(d => d.data().requesterId)
-        ];
+        const friendsList = friendsRes.friendships
+          .filter(f => f.status === 'accepted')
+          .map(f => {
+            const other = f.requesterId === user.uid ? f.addressee : f.requester;
+            return {
+              id: other.id,
+              displayName: other.displayName || 'User',
+              avatarUrl: other.avatarUrl
+            };
+          });
+        setAvailableFriends(friendsList);
 
-        console.log('Found friend IDs:', friendIds.length, friendIds);
-
-        if (friendIds.length === 0) {
-          console.log('No friends found');
-          setAvailableFriends([]);
-          setConversations([]);
-          setLoading(false);
-          return;
-        }
-
-        // Get friend details and conversations
-        const friends: Friend[] = [];
-        const convos: Conversation[] = [];
-
-        for (const friendId of friendIds) {
-          try {
-            console.log('Fetching friend data for:', friendId);
-
-            // Use getDoc directly instead of query
-            const friendSnap = await getDoc(doc(db, 'users', friendId));
-            const friendData = friendSnap.data();
-
-            if (!friendData) {
-              console.warn('Friend data not found for:', friendId);
-              continue;
-            }
-
-            friends.push({
-              id: friendId,
-              displayName: friendData.displayName || 'User',
-              avatarUrl: friendData.avatarUrl
-            });
-
-            const messagesSnap = await getDocs(
-              query(
-                collection(db, 'messages'),
-                where('conversationId', '==', [user.uid, friendId].sort().join('_')),
-                orderBy('createdAt', 'desc'),
-                limit(1)
-              )
-            );
-
-            const lastMsg = messagesSnap.docs[0]?.data();
-            convos.push({
-              id: friendId,
-              userId: friendId,
-              userName: friendData.displayName || 'User',
-              userAvatar: friendData.avatarUrl,
-              lastMessage: lastMsg?.content || 'Bắt đầu cuộc trò chuyện',
-              lastMessageTime: lastMsg?.createdAt ? timeAgo(lastMsg.createdAt) : 'Vừa xong',
-              unread: 0
-            });
-          } catch (e: any) {
-            console.error('Error fetching friend:', friendId, e?.code, e?.message);
-          }
-        }
-
-        console.log('Loaded friends:', friends.length);
-        setAvailableFriends(friends);
-        setConversations(convos.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()));
+        const convosList: Conversation[] = convosRes.conversations.map(c => ({
+          id: c.otherUser?.id || '',
+          userId: c.otherUser?.id || '',
+          userName: c.otherUser?.displayName || 'User',
+          userAvatar: c.otherUser?.avatarUrl,
+          lastMessage: c.lastMessage || 'Bắt đầu cuộc trò chuyện',
+          lastMessageTime: c.lastAt ? timeAgo(c.lastAt) : 'Vừa xong',
+          unread: 0
+        }));
+        setConversations(convosList.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()));
       } catch (e: any) {
         console.error('Error fetching conversations:', e);
-        toast('Lỗi tải hội thoại: ' + (e?.message || e?.code || 'Unknown error'), 'error');
+        toast('Lỗi tải hội thoại: ' + (e?.message || 'Unknown error'), 'error');
       } finally {
         setLoading(false);
       }
@@ -150,34 +104,84 @@ export default function Messages() {
     const conversationId = [user.uid, selectedUserId].sort().join('_');
     console.log('Setting up message listener for:', conversationId);
 
-    let unsubscribe: (() => void) | null = null;
+    let active = true;
 
-    try {
-      unsubscribe = onSnapshot(
-        query(
-          collection(db, 'messages'),
-          where('conversationId', '==', conversationId),
-          orderBy('createdAt', 'asc')
-        ),
-        (snap) => {
-          console.log('Messages received:', snap.docs.length);
-          setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() } as Message)));
-        },
-        (error: any) => {
-          console.error('Error listening to messages:', error?.code, error?.message, error);
-          toast('Lỗi tải tin nhắn: ' + (error?.message || error?.code || 'Unknown'), 'error');
-          // Don't fail completely - show empty messages
-          setMessages([]);
-        }
-      );
-    } catch (e: any) {
-      console.error('Error setting up listener:', e?.code, e?.message, e);
-      toast('Không thể kết nối: ' + (e?.message || 'Unknown error'), 'error');
-      setMessages([]);
+    // Load message history
+    const loadHistory = async () => {
+      try {
+        const res = await api.get<{ messages: any[] }>(`/api/v1/messages/${conversationId}`);
+        if (!active) return;
+        setMessages(
+          res.messages.map(msg => ({
+            id: msg.id,
+            senderId: msg.senderId,
+            senderName: msg.sender?.displayName || 'User',
+            senderAvatar: msg.sender?.avatarUrl,
+            recipientId: msg.recipientId,
+            content: msg.content,
+            createdAt: msg.createdAt,
+          }))
+        );
+      } catch (e: any) {
+        console.error('Error fetching history:', e);
+        toast('Lỗi tải lịch sử tin nhắn: ' + (e?.message || 'Unknown error'), 'error');
+      }
+    };
+
+    loadHistory();
+
+    // Join room & listen
+    joinConversation(conversationId);
+    
+    const socket = getSocket();
+    const handleNewMessage = (msg: any) => {
+      if (msg.conversationId === conversationId) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === msg.id)) return prev;
+          return [
+            ...prev,
+            {
+              id: msg.id,
+              senderId: msg.senderId,
+              senderName: msg.sender?.displayName || 'User',
+              senderAvatar: msg.sender?.avatarUrl,
+              recipientId: msg.recipientId,
+              content: msg.content,
+              createdAt: msg.createdAt,
+            }
+          ];
+        });
+
+        // Also update conversations list with the last message
+        setConversations(prev => {
+          return prev.map(c => {
+            if (c.userId === msg.senderId || c.userId === msg.recipientId) {
+              return {
+                ...c,
+                lastMessage: msg.content,
+                lastMessageTime: 'Vừa xong'
+              };
+            }
+            return c;
+          }).sort((a, b) => {
+            if (a.userId === msg.senderId || a.userId === msg.recipientId) return -1;
+            if (b.userId === msg.senderId || b.userId === msg.recipientId) return 1;
+            return 0;
+          });
+        });
+      }
+    };
+
+    if (socket) {
+      socket.on('new-message', handleNewMessage);
     }
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      active = false;
+      leaveConversation(conversationId);
+      if (socket) {
+        socket.off('new-message', handleNewMessage);
+      }
     };
   }, [user, selectedUserId, toast]);
 
@@ -186,30 +190,25 @@ export default function Messages() {
     if (!newMessage.trim() || !user || !selectedUserId) return;
 
     try {
-      const conversationId = [user.uid, selectedUserId].sort().join('_');
-      await addDoc(collection(db, 'messages'), {
-        conversationId,
-        senderId: user.uid,
-        senderName: user.displayName || user.email,
-        senderAvatar: user.photoURL,
+      await api.post(`/api/v1/messages`, {
         recipientId: selectedUserId,
         content: newMessage.trim(),
-        createdAt: new Date().toISOString()
       });
       setNewMessage('');
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error sending message:', e);
-      toast('Không thể gửi tin nhắn', 'error');
+      toast('Không thể gửi tin nhắn: ' + (e?.message || 'Unknown error'), 'error');
     }
   };
 
   const handleDeleteMessage = async (messageId: string) => {
     try {
-      await deleteDoc(doc(db, 'messages', messageId));
+      await api.delete(`/api/v1/messages/${messageId}`);
+      setMessages(prev => prev.filter(m => m.id !== messageId));
       toast('Tin nhắn đã được xoá', 'success');
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error deleting message:', e);
-      toast('Không thể xoá tin nhắn', 'error');
+      toast('Không thể xoá tin nhắn: ' + (e?.message || 'Unknown error'), 'error');
     }
   };
 

@@ -1,6 +1,12 @@
 import { create } from 'zustand';
-import { User } from 'firebase/auth';
 import { UserProfile } from '../types';
+
+export interface ClientUser {
+  uid: string;
+  email: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+}
 
 type Theme = 'dark' | 'light';
 
@@ -8,20 +14,19 @@ function getInitialTheme(): Theme {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem('geosnap-theme');
     if (stored === 'dark' || stored === 'light') return stored;
-    // Default to dark
     return 'dark';
   }
   return 'dark';
 }
 
 interface AppState {
-  user: User | null;
+  user: ClientUser | null;
   userProfile: UserProfile | null;
   authLoaded: boolean;
   unreadNotifications: number;
   theme: Theme;
   sidebarOpen: boolean;
-  setUser: (user: User | null) => void;
+  setUser: (user: ClientUser | null) => void;
   setUserProfile: (profile: UserProfile | null) => void;
   setAuthLoaded: (loaded: boolean) => void;
   setUnreadNotifications: (count: number) => void;

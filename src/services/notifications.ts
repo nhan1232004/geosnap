@@ -73,19 +73,11 @@ const handleNotificationTapped = (notification: any) => {
 
 const savePushToken = async (token: string) => {
   try {
-    // Save token to Firestore for later use
-    const { getAuth } = await import('firebase/auth');
-    const { db } = await import('../firebase');
-    const { doc, updateDoc } = await import('firebase/firestore');
-
-    const auth = getAuth();
-    if (auth.currentUser) {
-      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-        pushToken: token,
-        pushTokenUpdatedAt: new Date().toISOString()
-      });
-      console.log('Push token saved to Firestore');
-    }
+    const { api } = await import('../lib/api');
+    await api.put('/api/v1/users/me', {
+      pushToken: token,
+    });
+    console.log('Push token saved to backend API');
   } catch (error) {
     console.error('Error saving push token:', error);
   }
