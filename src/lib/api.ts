@@ -75,7 +75,7 @@ class ApiClient {
   async delete<T>(path: string): Promise<T> {
     const response = await fetch(`${BASE_URL}${path}`, {
       method: 'DELETE',
-      headers: this.getHeaders(),
+      headers: this.getHeaders(null),
     });
     // For 204 No Content, response.json() will fail, handled by our catch inside handleResponse
     return this.handleResponse<T>(response);
