@@ -151,45 +151,47 @@ function HeatmapSection({ weeks, max }: HeatmapProps) {
         </div>
       </div>
 
-      <div className="flex mb-1 pl-8" style={{ gap: '2px' }}>
-        {weeks.map((_, col) => {
-          const lbl = monthLabels.find((m) => m.col === col);
-          return (
-            <div key={col} className="flex-1 min-w-[12px] text-[9px] text-text-dim font-medium">
-              {lbl ? lbl.label : ''}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="flex gap-0.5">
-        <div className="flex flex-col gap-0.5 pr-1.5">
-          {days.map((d) => (
-            <div key={d} className="h-3 text-[9px] text-text-dim leading-3 flex items-center">
-              {d}
-            </div>
-          ))}
+      <div className="min-w-[680px]">
+        <div className="flex mb-1 pl-8" style={{ gap: '2px' }}>
+          {weeks.map((_, col) => {
+            const lbl = monthLabels.find((m) => m.col === col);
+            return (
+              <div key={col} className="flex-1 min-w-[12px] text-[9px] text-text-dim font-medium">
+                {lbl ? lbl.label : ''}
+              </div>
+            );
+          })}
         </div>
-        <div className="flex gap-0.5 flex-1">
-          {weeks.map((week, wi) => (
-            <div key={wi} className="flex flex-col gap-0.5 flex-1 min-w-[10px]">
-              {week.map((cell, di) => (
-                <div
-                  key={di}
-                  className={`h-3 rounded-[2px] border border-border-dim cursor-default transition-opacity hover:opacity-80 ${heatmapColor(cell.count, max)}`}
-                  onMouseEnter={(e) => {
-                    const rect = (e.target as HTMLElement).getBoundingClientRect();
-                    setTooltip({
-                      text: `${format(cell.date, 'dd/MM/yyyy')}: ${cell.count} ảnh`,
-                      x: rect.left,
-                      y: rect.top - 28,
-                    });
-                  }}
-                  onMouseLeave={() => setTooltip(null)}
-                />
-              ))}
-            </div>
-          ))}
+
+        <div className="flex gap-0.5">
+          <div className="flex flex-col gap-0.5 pr-1.5">
+            {days.map((d) => (
+              <div key={d} className="h-3 text-[9px] text-text-dim leading-3 flex items-center">
+                {d}
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-0.5 flex-1">
+            {weeks.map((week, wi) => (
+              <div key={wi} className="flex flex-col gap-0.5 flex-1 min-w-[10px]">
+                {week.map((cell, di) => (
+                  <div
+                    key={di}
+                    className={`h-3 rounded-[2px] border border-border-dim cursor-default transition-opacity hover:opacity-80 ${heatmapColor(cell.count, max)}`}
+                    onMouseEnter={(e) => {
+                      const rect = (e.target as HTMLElement).getBoundingClientRect();
+                      setTooltip({
+                        text: `${format(cell.date, 'dd/MM/yyyy')}: ${cell.count} ảnh`,
+                        x: rect.left,
+                        y: rect.top - 28,
+                      });
+                    }}
+                    onMouseLeave={() => setTooltip(null)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -229,14 +231,14 @@ function TopLocations({ folders }: TopLocationsProps) {
             const pct = Math.round((folder.photoCount / maxCount) * 100);
             return (
               <div key={folder.id} className="flex flex-col gap-1.5">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold text-text-dim w-4">{i + 1}</span>
-                    <span className="text-sm font-semibold text-text-main truncate max-w-[160px]">
+                <div className="flex justify-between items-center gap-4">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="text-[11px] font-bold text-text-dim w-4 shrink-0">{i + 1}</span>
+                    <span className="text-sm font-semibold text-text-main truncate">
                       {folder.name}
                     </span>
                   </div>
-                  <span className="text-xs font-bold text-brand">{folder.photoCount} ảnh</span>
+                  <span className="text-xs font-bold text-brand shrink-0">{folder.photoCount} ảnh</span>
                 </div>
                 <div className="h-2 bg-surface rounded-full overflow-hidden">
                   <div

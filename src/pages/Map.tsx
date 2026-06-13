@@ -7,7 +7,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useToast } from '../components/ToastContainer';
 import { LocationFolder, UserProfile } from '../types';
 import { Link } from 'react-router-dom';
-import { Users, User as UserIcon, MapPin, Calendar } from 'lucide-react';
+import { Users, User as UserIcon, MapPin, Calendar, Filter, X } from 'lucide-react';
 
 interface MapFolder extends LocationFolder {
   isMine: boolean;
@@ -71,6 +71,7 @@ export default function MapViewPage() {
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(5);
   const [timeFilter, setTimeFilter] = useState<'all' | 'week' | 'month' | 'year'>('all');
+  const [showMobilePanel, setShowMobilePanel] = useState(false);
 
   // Fetch own folders
   useEffect(() => {
@@ -186,14 +187,22 @@ export default function MapViewPage() {
   return (
     <div className="h-full w-full relative">
       {/* HUD Control Panel */}
-      <div className="absolute top-8 left-8 z-[400] w-80 bg-bg-card/85 backdrop-blur-md border border-border-dim rounded-3xl p-5 shadow-2xl max-h-[85vh] overflow-y-auto flex flex-col gap-4">
-        <div>
-          <h1 className="text-[20px] font-bold tracking-tight text-text-heading mb-1 flex items-center gap-2">
-            <MapPin className="w-5 h-5 text-brand" /> Bản đồ hành trình
-          </h1>
-          <p className="text-[11px] text-text-dim leading-relaxed">
-            Đang hiển thị {displayedFolders.length} địa điểm. Zoom: {zoom}
-          </p>
+      <div className={`absolute z-[400] bg-bg-card/85 backdrop-blur-md border border-border-dim rounded-3xl p-5 shadow-2xl overflow-y-auto flex flex-col gap-4 transition-all duration-300 md:flex md:max-h-[85vh] md:top-8 md:left-8 md:w-80 md:right-auto ${showMobilePanel ? 'flex top-4 left-4 right-4 max-h-[75vh]' : 'hidden'}`}>
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-[20px] font-bold tracking-tight text-text-heading mb-1 flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-brand" /> Bản đồ hành trình
+            </h1>
+            <p className="text-[11px] text-text-dim leading-relaxed">
+              Đang hiển thị {displayedFolders.length} địa điểm. Zoom: {zoom}
+            </p>
+          </div>
+          <button
+            onClick={() => setShowMobilePanel(false)}
+            className="md:hidden p-1.5 rounded-lg text-text-dim hover:text-text-heading hover:bg-surface transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Time Filter Pills */}
@@ -350,6 +359,17 @@ export default function MapViewPage() {
           }
         })}
       </MapContainer>
+
+      {/* Floating Toggle Button for Mobile */}
+      {!showMobilePanel && (
+        <button
+          onClick={() => setShowMobilePanel(true)}
+          className="absolute top-4 right-4 z-[400] md:hidden w-12 h-12 rounded-full bg-brand text-white shadow-2xl flex items-center justify-center hover:bg-brand/90 transition-all active:scale-95"
+          title="Bộ lọc bản đồ"
+        >
+          <Filter className="w-5 h-5" />
+        </button>
+      )}
     </div>
   );
 }

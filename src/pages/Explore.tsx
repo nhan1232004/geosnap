@@ -240,16 +240,18 @@ export default function Explore() {
 
       <div className="max-w-7xl mx-auto px-4 md:px-8 pb-20 space-y-10">
         <section>
-          <div className="flex items-center gap-2.5 mb-5">
-            <div className="w-8 h-8 rounded-xl bg-brand/15 border border-brand/25 flex items-center justify-center shrink-0">
-              <TrendingUp className="w-4 h-4 text-brand" />
-            </div>
-            <div>
-              <h2 className="text-text-heading font-bold text-lg leading-tight">Địa điểm nổi bật</h2>
-              <p className="text-text-dim text-xs">Được cộng đồng chia sẻ nhiều nhất</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-brand/15 border border-brand/25 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-4 h-4 text-brand" />
+              </div>
+              <div>
+                <h2 className="text-text-heading font-bold text-lg leading-tight">Địa điểm nổi bật</h2>
+                <p className="text-text-dim text-xs">Được cộng đồng chia sẻ nhiều nhất</p>
+              </div>
             </div>
 
-            <div className="ml-auto flex gap-1 bg-bg-card/60 backdrop-blur-sm border border-border-dim rounded-xl p-1">
+            <div className="sm:ml-auto flex gap-1 bg-bg-card/60 backdrop-blur-sm border border-border-dim rounded-xl p-1 w-full sm:w-auto justify-center">
               {tabs.map(tab => (
                 <button
                   key={tab.key}

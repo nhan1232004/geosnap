@@ -401,13 +401,13 @@ export default function Profile() {
                   <p className="text-text-dim text-[14px] max-w-xl mb-4 leading-relaxed">{profile.bio}</p>
                 )}
 
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 md:gap-6 text-[13px] text-text-main font-medium mb-6">
+                <div className="grid grid-cols-4 gap-2 w-full max-w-sm md:max-w-none md:flex md:w-auto md:items-center md:justify-start md:gap-6 text-[13px] text-text-main font-medium mb-6">
                   <StatItem value={folders.length} label="Hành trình" />
-                  <div className="w-px h-8 bg-border-dim" />
+                  <div className="hidden md:block w-px h-8 bg-border-dim" />
                   <StatItem value={totalPhotos} label="Bức ảnh" />
-                  <div className="w-px h-8 bg-border-dim" />
+                  <div className="hidden md:block w-px h-8 bg-border-dim" />
                   <StatItem value={uniqueCountries} label="Quốc gia" />
-                  <div className="w-px h-8 bg-border-dim" />
+                  <div className="hidden md:block w-px h-8 bg-border-dim" />
                   <StatItem value={uniqueCities} label="Thành phố" />
                 </div>
 

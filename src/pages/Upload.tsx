@@ -355,12 +355,12 @@ export default function Upload() {
   } as any);
 
   return (
-    <div className="mx-auto max-w-2xl p-10 pt-20">
-      <h1 className="mb-8 text-3xl font-bold tracking-tight text-text-heading">Upload Photos</h1>
+    <div className="mx-auto max-w-2xl p-4 sm:p-10 pt-6 sm:pt-20">
+      <h1 className="mb-6 sm:mb-8 text-2xl sm:text-3xl font-bold tracking-tight text-text-heading">Upload Photos</h1>
       
       <div 
         {...getRootProps()} 
-        className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-[20px] border-2 border-dashed p-16 text-center transition-all duration-300
+        className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-[20px] border-2 border-dashed p-6 sm:p-16 text-center transition-all duration-300
         ${isDragActive ? 'border-brand bg-brand/5' : 'border-border-dim hover:border-brand/50 hover:bg-glass'}
         ${uploading ? 'pointer-events-none opacity-50' : ''}`}
       >

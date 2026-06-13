@@ -218,11 +218,11 @@ export default function Messages() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto h-screen flex flex-col bg-bg-deep">
+    <div className="max-w-4xl mx-auto h-[calc(100dvh-53px-49px)] md:h-full w-full flex flex-col bg-bg-deep">
       {/* Header */}
-      <div className="px-4 py-4 md:px-6 md:py-6 border-b border-border-dim bg-bg-card">
-        <h1 className="text-[24px] md:text-[30px] font-bold text-text-heading">Nhắn tin</h1>
-        <p className="text-text-dim text-sm mt-1">Trò chuyện với bạn bè</p>
+      <div className={`px-4 py-3 md:px-6 md:py-6 border-b border-border-dim bg-bg-card ${selectedUserId ? 'hidden md:block' : 'block'} shrink-0`}>
+        <h1 className="text-[20px] md:text-[30px] font-bold text-text-heading">Nhắn tin</h1>
+        <p className="text-text-dim text-xs md:text-sm mt-0.5 md:mt-1">Trò chuyện với bạn bè</p>
       </div>
 
       {/* Main content */}

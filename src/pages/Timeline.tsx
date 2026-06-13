@@ -153,17 +153,17 @@ export default function Timeline() {
   if (loading) return <TimelineSkeleton />;
 
   return (
-    <div className="p-10 max-w-7xl mx-auto flex flex-col gap-8 page-enter">
-      <div className="flex justify-between items-end">
-        <div>
-          <h1 className="text-[32px] font-bold tracking-tight text-text-heading">Explore Journey</h1>
-          <div className="flex gap-6 mt-4">
+    <div className="p-4 sm:p-10 max-w-7xl mx-auto flex flex-col gap-6 sm:gap-8 page-enter">
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-end">
+        <div className="w-full">
+          <h1 className="text-[28px] sm:text-[32px] font-bold tracking-tight text-text-heading">Explore Journey</h1>
+          <div className="w-full mt-4">
             <UserStatsGrid userId={user?.uid} />
           </div>
         </div>
         <button
           onClick={() => setIsAdding(true)}
-          className="bg-brand text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-brand/90 transition-colors flex items-center"
+          className="bg-brand text-white text-sm font-medium px-5 py-2.5 rounded-full hover:bg-brand/90 transition-colors flex items-center justify-center w-full sm:w-auto shrink-0"
         >
           <Plus className="w-4 h-4 mr-1" /> New Folder
         </button>

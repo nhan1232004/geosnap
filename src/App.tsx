@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from './store/useAppStore';
 import { api } from './lib/api';
 import { connectSocket, disconnectSocket } from './lib/socket';
@@ -96,6 +96,9 @@ function AppContent() {
   const { user, userProfile, authLoaded, unreadNotifications, theme, sidebarOpen, setUser, setAuthLoaded, setUserProfile, toggleTheme, setSidebarOpen } = useAppStore();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const isFullHeightPage = ['/messages', '/map'].includes(location.pathname);
 
   // Apply theme class to document
   useEffect(() => {
@@ -295,9 +298,9 @@ function AppContent() {
             </aside>
 
             {/* Main content */}
-            <main className="flex-1 relative overflow-auto bg-bg-deep main-content">
+            <main className={`flex-1 relative bg-bg-deep main-content flex flex-col ${isFullHeightPage ? 'overflow-hidden !pb-0' : 'overflow-auto'}`}>
               {/* Mobile Header */}
-              <div className="md:hidden sticky top-0 z-20 bg-bg-deep/80 backdrop-blur-xl border-b border-border-dim px-4 py-3 flex items-center justify-between">
+              <div className="md:hidden sticky top-0 z-20 bg-bg-deep/80 backdrop-blur-xl border-b border-border-dim px-4 py-3 flex items-center justify-between shrink-0">
                 <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-card-hover transition-colors">
                   <Menu className="w-5 h-5 text-text-main" />
                 </button>
