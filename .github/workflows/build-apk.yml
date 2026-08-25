@@ -31,22 +31,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Setup google-services.json if provided
-        env:
-          GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          if [ -n "$GOOGLE_SERVICES" ]; then
-            echo "$GOOGLE_SERVICES" | base64 -d > android/app/google-services.json
-          fi
-
-      - name: Setup Keystore if secret provided
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE }}
-        run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
-          fi
-
       - name: Build web assets
         run: npm run build
 
@@ -56,31 +40,25 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build APKs (Release & Debug)
+      - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleRelease assembleDebug --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK Artifacts
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: geosnap-apks
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
-          retention-days: 7
+          name: geosnap-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          name: GeoSnap Android App v${{ github.run_number }}
-          files: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
+          name: GeoSnap v${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/*.apk
           body: |
-            📱 **GeoSnap v${{ github.run_number }} đã sẵn sàng!**
-
-            - 🚀 Đầy đủ 8 Sprints tính năng & tối ưu bảo mật.
-            - 📦 Tải file APK bên dưới (phần **Assets**) để cài đặt trực tiếp trên Android.
+            📱 **GeoSnap v${{ github.run_number }}**
+            Tải file APK ở phần Assets bên dưới để cài đặt trên Android.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
