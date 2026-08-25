@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Android APK
 
 on:
   push:
@@ -29,13 +29,15 @@ jobs:
           java-version: '21'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --legacy-peer-deps
 
-      - name: Create google-services.json
+      - name: Setup google-services.json if provided
+        if: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > android/app/google-services.json
 
-      - name: Decode Keystore
-        run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > android/app/android.keystore
+      - name: Setup Keystore if secret provided
+        if: ${{ secrets.ANDROID_KEYSTORE != '' }}
+        run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > android/app/release.keystore
 
       - name: Build web assets
         run: npm run build
@@ -46,35 +48,31 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build Release APK
+      - name: Build APKs (Release & Debug)
         working-directory: android
-        env:
-          KEYSTORE_PATH: ${{ github.workspace }}/android/app/android.keystore
-          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file="${KEYSTORE_PATH}" \
-            -Pandroid.injected.signing.store.password="${KEYSTORE_PASS}" \
-            -Pandroid.injected.signing.key.alias="${KEY_ALIAS}" \
-            -Pandroid.injected.signing.key.password="${KEY_PASS}"
+        run: ./gradlew assembleRelease assembleDebug --no-daemon
 
-      - name: Upload APK Artifact
+      - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: geosnap-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          name: geosnap-apks
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/debug/*.apk
           retention-days: 7
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          name: GeoSnap v${{ github.run_number }}
-          files: android/app/build/outputs/apk/release/*.apk
+          name: GeoSnap Android App v${{ github.run_number }}
+          files: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/debug/*.apk
           body: |
-            📱 GeoSnap v${{ github.run_number }}
-            Tải APK ở phần Assets bên dưới.
+            📱 **GeoSnap v${{ github.run_number }} đã sẵn sàng!**
+
+            - 🚀 Đầy đủ 8 Sprints tính năng & tối ưu bảo mật.
+            - 📦 Tải file APK bên dưới (phần **Assets**) để cài đặt trực tiếp trên Android.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
