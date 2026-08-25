@@ -42,11 +42,22 @@ service cloud.firestore {
           (request.auth.token.email == "nguoicoich1234@gmail.com" && request.auth.token.email_verified == true));
     }
 
-    // Check if two users are friends
+    // ✅ FIX: Check if two users are friends (bidirectional)
     function areFriends(uid1, uid2) {
       return (
         exists(/databases/$(database)/documents/friendships/$(uid1 + '_' + uid2)) ||
         exists(/databases/$(database)/documents/friendships/$(uid2 + '_' + uid1))
+      );
+    }
+
+    // ✅ FIX: Check if friendship exists and is accepted
+    function isFriendshipAccepted(uid1, uid2) {
+      let doc1 = get(/databases/$(database)/documents/friendships/$(uid1 + '_' + uid2));
+      let doc2 = get(/databases/$(database)/documents/friendships/$(uid2 + '_' + uid1));
+      
+      return (
+        (exists(doc1.path) && doc1.data.status == 'accepted') ||
+        (exists(doc2.path) && doc2.data.status == 'accepted')
       );
     }
 
@@ -119,41 +130,38 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      // Anyone authenticated can read (for invite lookup by inviteCode query, profile view)
       allow read: if isAuthenticated();
-      // Create: User can create their own doc, OR auto-generated via Auth (backend)
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
-                    uidUnchanged() &&
-                    ((request.resource.data.role == 'user') || isAdmin());
-      // Allow creation without full validation for mobile compatibility
+                     uidUnchanged() &&
+                     ((request.resource.data.role == 'user') || isAdmin());
       allow create: if isOwner(userId) && request.resource.data.uid == userId &&
-                    request.resource.data.email is string &&
-                    request.resource.data.role == 'user' &&
-                    request.resource.data.createdAt is string;
+                     request.resource.data.email is string &&
+                     request.resource.data.role == 'user' &&
+                     request.resource.data.createdAt is string;
       allow update: if (isOwner(userId) && isValidUser(request.resource.data) &&
-                    request.resource.data.role == resource.data.role &&
-                    request.resource.data.createdAt == resource.data.createdAt) ||
-                    (isAdmin() && isValidUser(request.resource.data));
+                     request.resource.data.role == resource.data.role &&
+                     request.resource.data.createdAt == resource.data.createdAt) ||
+                     (isAdmin() && isValidUser(request.resource.data));
     }
 
     match /photos/{photoId} {
       allow read: if isDocOwner() || isAdmin();
       allow create: if isAuthenticated() && isValidPhoto(request.resource.data) && uidUnchanged();
       allow update: if isDocOwner() && isValidPhoto(request.resource.data) &&
-                    uidNotModified() &&
-                    request.resource.data.uploadedAt == resource.data.uploadedAt;
+                     uidNotModified() &&
+                     request.resource.data.uploadedAt == resource.data.uploadedAt;
       allow delete: if isDocOwner() || isAdmin();
     }
 
     match /folders/{folderId} {
-      // Owner can always read; friends can read if visibility is 'friends' or 'public'; anyone if 'public'
+      // ✅ FIX: Improved read access with friend verification
       allow read: if isDocOwner() || isAdmin() ||
                   (isAuthenticated() && resource.data.visibility == 'public') ||
-                  (isAuthenticated() && resource.data.visibility == 'friends');
+                  (isAuthenticated() && resource.data.visibility == 'friends' && isFriendshipAccepted(request.auth.uid, resource.data.uid));
       allow create: if isAuthenticated() && isValidFolder(request.resource.data) && uidUnchanged();
       allow update: if isDocOwner() && isValidFolder(request.resource.data) &&
-                    uidNotModified() &&
-                    request.resource.data.createdAt == resource.data.createdAt;
+                     uidNotModified() &&
+                     request.resource.data.createdAt == resource.data.createdAt;
       allow delete: if isDocOwner() || isAdmin();
     }
 
@@ -161,17 +169,14 @@ service cloud.firestore {
     // Friendships
     // ---------------------------------------------------------------
     match /friendships/{friendshipId} {
-      // Can read if you are requester or addressee
       allow read: if isAuthenticated() && (
         resource.data.requesterId == request.auth.uid ||
         resource.data.addresseeId == request.auth.uid
       );
-      // Can create a friendship request (you must be the requester)
       allow create: if isAuthenticated() &&
-                    isValidFriendship(request.resource.data) &&
-                    request.resource.data.requesterId == request.auth.uid &&
-                    request.resource.data.status == 'pending';
-      // Can update if you are addressee (accept/decline) or requester (cancel)
+                     isValidFriendship(request.resource.data) &&
+                     request.resource.data.requesterId == request.auth.uid &&
+                     request.resource.data.status == 'pending';
       allow update: if isAuthenticated() && (
         resource.data.addresseeId == request.auth.uid ||
         resource.data.requesterId == request.auth.uid
@@ -186,11 +191,8 @@ service cloud.firestore {
     // Notifications
     // ---------------------------------------------------------------
     match /notifications/{notificationId} {
-      // Only recipient can read their own notifications
       allow read: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
-      // Anyone authenticated can create a notification (sending to another user)
       allow create: if isAuthenticated() && isValidNotification(request.resource.data);
-      // Only recipient can update (mark as read)
       allow update: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
       allow delete: if isAuthenticated() && resource.data.recipientId == request.auth.uid;
     }
@@ -201,12 +203,12 @@ service cloud.firestore {
     match /comments/{commentId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() &&
-                    request.resource.data.uid == request.auth.uid &&
-                    request.resource.data.content is string &&
-                    request.resource.data.content.size() <= 500 &&
-                    (( 'folderId' in request.resource.data && request.resource.data.folderId is string ) ||
-                     ( 'postId' in request.resource.data && request.resource.data.postId is string )) &&
-                    request.resource.data.createdAt is string;
+                     request.resource.data.uid == request.auth.uid &&
+                     request.resource.data.content is string &&
+                     request.resource.data.content.size() <= 500 &&
+                     (( 'folderId' in request.resource.data && request.resource.data.folderId is string ) ||
+                      ( 'postId' in request.resource.data && request.resource.data.postId is string )) &&
+                     request.resource.data.createdAt is string;
       allow update: if false; // Comments are immutable
       allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
     }
@@ -215,17 +217,17 @@ service cloud.firestore {
     // Posts
     // ---------------------------------------------------------------
     match /posts/{postId} {
-      // Any authenticated user can read posts.
-      // Visibility filtering (friends/public/private) is enforced client-side.
-      // This allows collection queries without requiring composite indexes.
-      allow read: if isAuthenticated();
+      // ✅ FIX: Improved post read access with visibility and friend verification
+      allow read: if isDocOwner() || isAdmin() ||
+                  (isAuthenticated() && resource.data.visibility == 'public') ||
+                  (isAuthenticated() && resource.data.visibility == 'friends' && isFriendshipAccepted(request.auth.uid, resource.data.uid));
       allow create: if isAuthenticated() &&
-                    request.resource.data.uid == request.auth.uid &&
-                    request.resource.data.type in ['post', 'story'] &&
-                    request.resource.data.content is string &&
-                    request.resource.data.imageUrls is list &&
-                    request.resource.data.visibility in ['public', 'friends', 'private'] &&
-                    request.resource.data.createdAt is string;
+                     request.resource.data.uid == request.auth.uid &&
+                     request.resource.data.type in ['post', 'story'] &&
+                     request.resource.data.content is string &&
+                     request.resource.data.imageUrls is list &&
+                     request.resource.data.visibility in ['public', 'friends', 'private'] &&
+                     request.resource.data.createdAt is string;
       allow update: if isDocOwner() || (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'commentCount', 'shareCount']));
       allow delete: if isDocOwner() || isAdmin();
     }
@@ -234,14 +236,17 @@ service cloud.firestore {
     // Messages
     // ---------------------------------------------------------------
     match /messages/{messageId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
       allow create: if isAuthenticated() &&
-                    request.resource.data.senderId == request.auth.uid &&
-                    request.resource.data.conversationId is string &&
-                    request.resource.data.recipientId is string &&
-                    request.resource.data.content is string &&
-                    request.resource.data.content.size() <= 1000 &&
-                    request.resource.data.createdAt is string;
+                     request.resource.data.senderId == request.auth.uid &&
+                     request.resource.data.conversationId is string &&
+                     request.resource.data.recipientId is string &&
+                     request.resource.data.content is string &&
+                     request.resource.data.content.size() <= 1000 &&
+                     request.resource.data.createdAt is string;
       allow delete: if isAuthenticated() && resource.data.senderId == request.auth.uid;
     }
   }
