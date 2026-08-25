@@ -6,6 +6,9 @@ import { connectSocket, disconnectSocket } from './lib/socket';
 import { ToastProvider, useToast } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { registerToastNotifier } from './lib/asyncErrorHandler';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from './firebase';
 import { Sun, Moon, Menu, X } from 'lucide-react';
 import { initializePushNotifications } from './services/notifications';
 
@@ -124,19 +127,43 @@ function AppContent() {
     }
   }, [user, toast]);
 
-  // Authenticate user via JWT on mount
+  // Authenticate user via Firebase Auth on mount
   useEffect(() => {
-    const fetchUser = async () => {
-      const token = api.getToken();
-      if (!token) {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
         setUser(null);
         setUserProfile(null);
+        api.setToken(null);
+        disconnectSocket();
         setAuthLoaded(true);
         return;
       }
 
       try {
-        const profile = await api.get<UserProfile>('/api/v1/users/me');
+        const token = await firebaseUser.getIdToken();
+        api.setToken(token);
+
+        let profile: UserProfile | null = null;
+        try {
+          const docSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (docSnap.exists()) {
+            profile = docSnap.data() as UserProfile;
+          }
+        } catch (e) {
+          console.warn('Could not fetch from Firestore, using auth fallback:', e);
+        }
+
+        if (!profile) {
+          profile = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            displayName: firebaseUser.displayName || 'User',
+            avatarUrl: firebaseUser.photoURL || undefined,
+            role: 'user',
+            createdAt: new Date().toISOString(),
+          };
+        }
+
         setUser({
           uid: profile.uid,
           email: profile.email,
@@ -146,20 +173,21 @@ function AppContent() {
         setUserProfile(profile);
         connectSocket(token);
       } catch (err) {
-        console.error('Failed to fetch authenticated user profile:', err);
-        api.setToken(null);
-        disconnectSocket();
-        setUser(null);
-        setUserProfile(null);
+        console.error('Failed to process auth state:', err);
       } finally {
         setAuthLoaded(true);
       }
-    };
+    });
 
-    fetchUser();
+    return () => unsubscribe();
   }, [setUser, setUserProfile, setAuthLoaded]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error('Logout error:', e);
+    }
     api.setToken(null);
     disconnectSocket();
     setUser(null);

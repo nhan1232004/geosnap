@@ -3,8 +3,39 @@ import { useAppStore } from '../store/useAppStore';
 import { api } from '../lib/api';
 import { connectSocket } from '../lib/socket';
 import { Eye, EyeOff, MapPin, Camera, Globe, Users, ArrowLeft, Mail } from 'lucide-react';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  sendPasswordResetEmail,
+  signInWithPopup,
+} from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db, googleProvider } from '../firebase';
+import { UserProfile } from '../types';
 
 type AuthMode = 'choose' | 'email-login' | 'email-register' | 'forgot-password';
+
+function getFirebaseAuthErrorMessage(code: string, fallback: string): string {
+  switch (code) {
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'Email hoặc mật khẩu không chính xác.';
+    case 'auth/email-already-in-use':
+      return 'Email này đã được đăng ký trước đó. Vui lòng đăng nhập.';
+    case 'auth/weak-password':
+      return 'Mật khẩu quá yếu (tối thiểu 6 ký tự).';
+    case 'auth/invalid-email':
+      return 'Địa chỉ email không đúng định dạng.';
+    case 'auth/network-request-failed':
+      return 'Lỗi kết nối mạng. Vui lòng kiểm tra lại Internet.';
+    case 'auth/too-many-requests':
+      return 'Quá nhiều lần thử thất bại. Vui lòng thử lại sau vài phút.';
+    default:
+      return fallback;
+  }
+}
 
 // Animated floating blob
 function Blob({ className }: { className: string }) {
@@ -40,34 +71,92 @@ export default function Login() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  const handleGoogle = () => {
-    setError('');
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    window.location.href = `${apiUrl}/auth/google`;
+  const handleGoogle = async () => {
+    setError(''); setLoading(true);
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      const token = await cred.user.getIdToken();
+      api.setToken(token);
+
+      const userDocRef = doc(db, 'users', cred.user.uid);
+      const userDoc = await getDoc(userDocRef);
+      let profile: UserProfile;
+
+      if (userDoc.exists()) {
+        profile = userDoc.data() as UserProfile;
+      } else {
+        profile = {
+          uid: cred.user.uid,
+          email: cred.user.email || '',
+          displayName: cred.user.displayName || 'User',
+          avatarUrl: cred.user.photoURL || undefined,
+          role: 'user',
+          createdAt: new Date().toISOString(),
+        };
+        await setDoc(userDocRef, profile, { merge: true });
+      }
+
+      setUser({
+        uid: profile.uid,
+        email: profile.email,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+      });
+      setUserProfile(profile);
+      connectSocket(token);
+    } catch (err: any) {
+      console.error('Google Sign In Error:', err);
+      setError(getFirebaseAuthErrorMessage(err.code, 'Đăng nhập Google không thành công.'));
+    } finally { setLoading(false); }
   };
 
   const handleFacebook = () => {
-    setError('');
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    window.location.href = `${apiUrl}/auth/facebook`;
+    setError('Đăng nhập Facebook hiện đang bảo trì.');
   };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      const data = await api.post<{ token: string; user: any }>('/auth/login', { email, password });
-      api.setToken(data.token);
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const token = await cred.user.getIdToken();
+      api.setToken(token);
+
+      let profile: UserProfile;
+      try {
+        const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
+        profile = userDoc.exists()
+          ? (userDoc.data() as UserProfile)
+          : {
+              uid: cred.user.uid,
+              email: cred.user.email || email.trim(),
+              displayName: cred.user.displayName || 'User',
+              avatarUrl: cred.user.photoURL || undefined,
+              role: 'user',
+              createdAt: new Date().toISOString(),
+            };
+      } catch {
+        profile = {
+          uid: cred.user.uid,
+          email: cred.user.email || email.trim(),
+          displayName: cred.user.displayName || 'User',
+          avatarUrl: cred.user.photoURL || undefined,
+          role: 'user',
+          createdAt: new Date().toISOString(),
+        };
+      }
+
       setUser({
-        uid: data.user.uid,
-        email: data.user.email,
-        displayName: data.user.displayName,
-        avatarUrl: data.user.avatarUrl,
+        uid: cred.user.uid,
+        email: profile.email,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
       });
-      setUserProfile(data.user);
-      connectSocket(data.token);
+      setUserProfile(profile);
+      connectSocket(token);
     } catch (err: any) {
-      setError(err.message || 'Email hoặc mật khẩu không đúng.');
+      console.error('Email Login Error:', err);
+      setError(getFirebaseAuthErrorMessage(err.code, err.message || 'Email hoặc mật khẩu không đúng.'));
     } finally { setLoading(false); }
   };
 
@@ -75,22 +164,44 @@ export default function Login() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      const data = await api.post<{ token: string; user: any }>('/auth/register', {
-        email,
-        password,
-        displayName: name,
-      });
-      api.setToken(data.token);
+      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      if (name.trim()) {
+        try {
+          await updateProfile(cred.user, { displayName: name.trim() });
+        } catch (e) {
+          console.warn('Could not update display name:', e);
+        }
+      }
+
+      const token = await cred.user.getIdToken();
+      api.setToken(token);
+
+      const profile: UserProfile = {
+        uid: cred.user.uid,
+        email: cred.user.email || email.trim(),
+        displayName: name.trim() || cred.user.displayName || 'User',
+        avatarUrl: cred.user.photoURL || undefined,
+        role: 'user',
+        createdAt: new Date().toISOString(),
+      };
+
+      try {
+        await setDoc(doc(db, 'users', cred.user.uid), profile, { merge: true });
+      } catch (e) {
+        console.warn('Could not save user profile to Firestore:', e);
+      }
+
       setUser({
-        uid: data.user.uid,
-        email: data.user.email,
-        displayName: data.user.displayName,
-        avatarUrl: data.user.avatarUrl,
+        uid: profile.uid,
+        email: profile.email,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
       });
-      setUserProfile(data.user);
-      connectSocket(data.token);
+      setUserProfile(profile);
+      connectSocket(token);
     } catch (err: any) {
-      setError(err.message || 'Không thể tạo tài khoản. Vui lòng thử lại.');
+      console.error('Email Register Error:', err);
+      setError(getFirebaseAuthErrorMessage(err.code, err.message || 'Không thể tạo tài khoản. Vui lòng thử lại.'));
     } finally { setLoading(false); }
   };
 
@@ -98,10 +209,11 @@ export default function Login() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      await api.post('/auth/reset-password', { email });
+      await sendPasswordResetEmail(auth, email.trim());
       setSuccessMsg('Đã gửi email đặt lại mật khẩu. Kiểm tra hộp thư của bạn!');
     } catch (err: any) {
-      setError(err.message || 'Email không tồn tại hoặc không hợp lệ.');
+      console.error('Reset Password Error:', err);
+      setError(getFirebaseAuthErrorMessage(err.code, 'Email không tồn tại hoặc không hợp lệ.'));
     } finally { setLoading(false); }
   };
 
