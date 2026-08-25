@@ -1,3 +1,5 @@
+import { ApiError, TimeoutError, NetworkError } from './errorHandler';
+
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 interface TokenResponse {
@@ -166,12 +168,9 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const error = new Error(
-        (data as ApiErrorResponse)?.error || `HTTP error! status: ${response.status}`
-      );
-      (error as any).status = response.status;
-      (error as any).code = (data as ApiErrorResponse)?.code;
-      throw error;
+      const message = (data as ApiErrorResponse)?.error || `HTTP error! status: ${response.status}`;
+      const code = (data as ApiErrorResponse)?.code;
+      throw new ApiError(message, response.status, code, data);
     }
 
     return data as T;
@@ -201,7 +200,10 @@ class ApiClient {
       });
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${timeout}ms`);
+        throw new TimeoutError(`Request timeout after ${timeout}ms`);
+      }
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new NetworkError(error.message);
       }
       throw error;
     } finally {

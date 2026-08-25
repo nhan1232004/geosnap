@@ -11,6 +11,7 @@ import {
 import { format, subYears, startOfWeek, addDays } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { api } from '../lib/api';
+import { ErrorFallback } from '../components/ErrorFallback';
 
 interface DashboardData {
   stats: {
@@ -392,22 +393,24 @@ export default function Dashboard() {
   const { user } = useAppStore();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchStats = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<DashboardData>('/api/v1/dashboard/stats');
+      setData(res);
+    } catch (err: any) {
+      console.error('Dashboard data fetch error:', err);
+      setError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải dữ liệu thống kê'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!user) return;
-
-    async function fetchStats() {
-      setLoading(true);
-      try {
-        const res = await api.get<DashboardData>('/api/v1/dashboard/stats');
-        setData(res);
-      } catch (err) {
-        console.error('Dashboard data fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     fetchStats();
   }, [user]);
 
@@ -422,7 +425,21 @@ export default function Dashboard() {
     return Math.max(...heatmapWeeks.flat().map((c) => c.count), 1);
   }, [heatmapWeeks]);
 
-  if (loading || !data) return <DashboardSkeleton />;
+  if (loading) return <DashboardSkeleton />;
+
+  if (error || !data) {
+    return (
+      <div className="p-6 md:p-10 max-w-7xl mx-auto">
+        <ErrorFallback
+          error={error}
+          title="Không thể tải dữ liệu thống kê"
+          message={error?.message || 'Đã xảy ra lỗi khi lấy dữ liệu tổng quan.'}
+          onRetry={fetchStats}
+          fullScreen
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto flex flex-col gap-8 page-enter">

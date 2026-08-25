@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Search, TrendingUp, MapPin, Globe, Camera, Compass } from 'lucide-react';
 import { LazyImagePlaceholder } from '../components/LazyImage';
+import { ErrorFallback } from '../components/ErrorFallback';
 import type { LocationFolder, UserProfile, Photo } from '../types';
 
 type FilterTab = 'all' | 'popular' | 'recent';
@@ -128,10 +129,13 @@ export default function Explore() {
   const [photos, setPhotos] = useState<PublicPhoto[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(true);
   const [loadingPhotos, setLoadingPhotos] = useState(true);
+  const [foldersError, setFoldersError] = useState<Error | null>(null);
+  const [photosError, setPhotosError] = useState<Error | null>(null);
 
   // Fetch public folders
   const fetchFolders = useCallback(async (tab: FilterTab) => {
     setLoadingFolders(true);
+    setFoldersError(null);
     try {
       const order = tab === 'recent' ? 'createdAt' : 'photoCount';
       const res = await api.get<{ folders: any[] }>(`/api/v1/explore/folders?limit=12&orderBy=${order}`);
@@ -144,8 +148,9 @@ export default function Explore() {
         } : undefined
       }));
       setFolders(enriched);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch public folders:', err);
+      setFoldersError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải địa điểm công khai'));
       setFolders([]);
     } finally {
       setLoadingFolders(false);
@@ -155,11 +160,13 @@ export default function Explore() {
   // Fetch public photos
   const fetchPhotos = useCallback(async () => {
     setLoadingPhotos(true);
+    setPhotosError(null);
     try {
       const res = await api.get<{ photos: any[] }>('/api/v1/explore/photos?limit=24');
       setPhotos(res.photos);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch public photos:', err);
+      setPhotosError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải ảnh công khai'));
       setPhotos([]);
     } finally {
       setLoadingPhotos(false);
@@ -274,6 +281,13 @@ export default function Explore() {
                 <FolderCardSkeleton key={i} />
               ))}
             </div>
+          ) : foldersError ? (
+            <ErrorFallback
+              error={foldersError}
+              title="Không thể tải địa điểm khám phá"
+              message={foldersError.message}
+              onRetry={() => fetchFolders(activeTab)}
+            />
           ) : folders.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {folders.map((folder, idx) => (
@@ -311,6 +325,14 @@ export default function Explore() {
                   <PhotoGridSkeleton key={i} />
                 ))}
               </div>
+            ) : photosError ? (
+              <ErrorFallback
+                error={photosError}
+                compact
+                title="Lỗi tải ảnh mới"
+                message={photosError.message}
+                onRetry={fetchPhotos}
+              />
             ) : photos.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {photos.map(photo => (

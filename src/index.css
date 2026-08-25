@@ -364,3 +364,34 @@ img, video, canvas, svg, .no-transition {
 .online-dot {
   animation: onlinePulse 2s ease-in-out infinite;
 }
+
+/* ===== MOBILE SAFE AREA & TOUCH OPTIMIZATION ===== */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .mobile-bottom-nav {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)) !important;
+  }
+  .main-content:not(.overflow-hidden) {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .desktop-sidebar {
+    display: none;
+  }
+  .main-content:not(.overflow-hidden) {
+    padding-bottom: 5.5rem;
+  }
+}
+
+/* Smooth mobile scrolling */
+.main-content {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Fast tap response on mobile touch */
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+

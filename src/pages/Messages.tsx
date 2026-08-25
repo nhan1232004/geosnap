@@ -5,6 +5,7 @@ import { Send, Trash2, ArrowLeft, UserPlus } from 'lucide-react';
 import { timeAgo } from '../lib/utils';
 import { api } from '../lib/api';
 import { getSocket, joinConversation, leaveConversation } from '../lib/socket';
+import { ErrorFallback } from '../components/ErrorFallback';
 
 interface Message {
   id: string;
@@ -41,6 +42,7 @@ export default function Messages() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
   const [showFriendsList, setShowFriendsList] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -52,50 +54,51 @@ export default function Messages() {
     scrollToBottom();
   }, [messages]);
 
+  const fetchData = async () => {
+    if (!user) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const [friendsRes, convosRes] = await Promise.all([
+        api.get<{ friendships: any[] }>('/api/v1/friendships'),
+        api.get<{ conversations: any[] }>('/api/v1/messages/conversations')
+      ]);
+
+      const friendsList = friendsRes.friendships
+        .filter(f => f.status === 'accepted')
+        .map(f => {
+          const other = f.requesterId === user.uid ? f.addressee : f.requester;
+          return {
+            id: other.id,
+            displayName: other.displayName || 'User',
+            avatarUrl: other.avatarUrl
+          };
+        });
+      setAvailableFriends(friendsList);
+
+      const convosList: Conversation[] = convosRes.conversations.map(c => ({
+        id: c.otherUser?.id || '',
+        userId: c.otherUser?.id || '',
+        userName: c.otherUser?.displayName || 'User',
+        userAvatar: c.otherUser?.avatarUrl,
+        lastMessage: c.lastMessage || 'Bắt đầu cuộc trò chuyện',
+        lastMessageTime: c.lastAt ? timeAgo(c.lastAt) : 'Vừa xong',
+        unread: 0
+      }));
+      setConversations(convosList.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()));
+    } catch (e: any) {
+      console.error('Error fetching conversations:', e);
+      setError(e instanceof Error ? e : new Error(e?.message || 'Lỗi tải hội thoại'));
+      toast('Lỗi tải hội thoại: ' + (e?.message || 'Unknown error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Fetch conversations and available friends
   useEffect(() => {
-    if (!user) return;
-
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const [friendsRes, convosRes] = await Promise.all([
-          api.get<{ friendships: any[] }>('/api/v1/friendships'),
-          api.get<{ conversations: any[] }>('/api/v1/messages/conversations')
-        ]);
-
-        const friendsList = friendsRes.friendships
-          .filter(f => f.status === 'accepted')
-          .map(f => {
-            const other = f.requesterId === user.uid ? f.addressee : f.requester;
-            return {
-              id: other.id,
-              displayName: other.displayName || 'User',
-              avatarUrl: other.avatarUrl
-            };
-          });
-        setAvailableFriends(friendsList);
-
-        const convosList: Conversation[] = convosRes.conversations.map(c => ({
-          id: c.otherUser?.id || '',
-          userId: c.otherUser?.id || '',
-          userName: c.otherUser?.displayName || 'User',
-          userAvatar: c.otherUser?.avatarUrl,
-          lastMessage: c.lastMessage || 'Bắt đầu cuộc trò chuyện',
-          lastMessageTime: c.lastAt ? timeAgo(c.lastAt) : 'Vừa xong',
-          unread: 0
-        }));
-        setConversations(convosList.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()));
-      } catch (e: any) {
-        console.error('Error fetching conversations:', e);
-        toast('Lỗi tải hội thoại: ' + (e?.message || 'Unknown error'), 'error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
-  }, [user, toast]);
+  }, [user]);
 
   // Listen to messages for selected conversation
   useEffect(() => {
@@ -243,6 +246,16 @@ export default function Messages() {
           {loading ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-text-dim">Đang tải...</div>
+            </div>
+          ) : error ? (
+            <div className="p-4">
+              <ErrorFallback
+                error={error}
+                compact
+                title="Lỗi tải hội thoại"
+                message={error.message}
+                onRetry={fetchData}
+              />
             </div>
           ) : showFriendsList ? (
             <div className="flex-1 flex flex-col">

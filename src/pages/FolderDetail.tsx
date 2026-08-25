@@ -19,6 +19,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { cn } from '../lib/utils';
 import { Lightbox, useLightbox } from '../components/Lightbox';
+import { ErrorFallback } from '../components/ErrorFallback';
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ export default function FolderDetail() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
   // States for editing
   const [isEditingDesc, setIsEditingDesc] = useState(false);
@@ -72,32 +74,34 @@ export default function FolderDetail() {
   }));
   const { openAt, lightboxElement } = useLightbox(lightboxPhotos);
 
-  useEffect(() => {
+  const fetchData = async () => {
     if (!id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const folderData = await api.get<LocationFolder>(`/api/v1/folders/${id}`);
+      setFolder(folderData);
+      setDescInput(folderData.description || '');
 
-    const fetchData = async () => {
-      try {
-        const folderData = await api.get<LocationFolder>(`/api/v1/folders/${id}`);
-        setFolder(folderData);
-        setDescInput(folderData.description || '');
+      const photoData = await api.get<{ photos: Photo[] }>(`/api/v1/photos?folderId=${id}`);
+      const fetchedPhotos = photoData.photos;
+      fetchedPhotos.sort((a, b) => {
+        if (!a.takenAt || !b.takenAt) return 0;
+        return new Date(b.takenAt).getTime() - new Date(a.takenAt).getTime();
+      });
+      setPhotos(fetchedPhotos);
 
-        const photoData = await api.get<{ photos: Photo[] }>(`/api/v1/photos?folderId=${id}`);
-        const fetchedPhotos = photoData.photos;
-        fetchedPhotos.sort((a, b) => {
-          if (!a.takenAt || !b.takenAt) return 0;
-          return new Date(b.takenAt).getTime() - new Date(a.takenAt).getTime();
-        });
-        setPhotos(fetchedPhotos);
+      const commentData = await api.get<{ comments: Comment[] }>(`/api/v1/comments?folderId=${id}`);
+      setComments(commentData.comments);
+    } catch (err: any) {
+      console.error('Failed to fetch folder details:', err);
+      setError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải chi tiết địa điểm'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        const commentData = await api.get<{ comments: Comment[] }>(`/api/v1/comments?folderId=${id}`);
-        setComments(commentData.comments);
-      } catch (err) {
-        console.error('Failed to fetch folder details:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
+  useEffect(() => {
     fetchData();
   }, [id]);
 
@@ -172,16 +176,16 @@ export default function FolderDetail() {
     );
   }
 
-  if (!folder) {
+  if (error || !folder) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center space-y-3">
-          <MapPin className="w-12 h-12 text-text-dim mx-auto" />
-          <p className="text-text-dim text-lg">Folder not found.</p>
-          <Link to="/" className="text-brand hover:underline text-sm">
-            ← Back to timeline
-          </Link>
-        </div>
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <ErrorFallback
+          error={error}
+          title="Không tìm thấy địa điểm"
+          message={error?.message || 'Địa điểm này có thể đã bị xóa hoặc bạn không có quyền truy cập.'}
+          onRetry={fetchData}
+          fullScreen
+        />
       </div>
     );
   }

@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { Friendship, UserProfile } from '../types';
 import { timeAgo } from '../lib/utils';
+import { ErrorFallback } from '../components/ErrorFallback';
 
 const EMOJIS = ['✈️', '🗺️', '📸', '🌏', '🏔️', '🏖️'];
 function randomEmoji() { return EMOJIS[Math.floor(Math.random() * EMOJIS.length)]; }
@@ -15,6 +16,7 @@ export default function Friends() {
   const [friends, setFriends] = useState<(Friendship & { otherUser: UserProfile })[]>([]);
   const [pending, setPending] = useState<(Friendship & { otherUser: UserProfile })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
   const [copied, setCopied] = useState(false);
 
   const inviteLink = userProfile?.inviteCode
@@ -32,6 +34,7 @@ export default function Friends() {
   const fetchFriendships = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await api.get<{ friendships: any[] }>('/api/v1/friendships');
       const enriched = res.friendships.map(f => {
@@ -60,8 +63,9 @@ export default function Friends() {
       const incomingPending = enriched.filter(f => f.status === 'pending' && f.addresseeId === user.uid);
       setPending(incomingPending);
       setUnreadNotifications(incomingPending.length);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch friendships:', e);
+      setError(e instanceof Error ? e : new Error(e?.message || 'Không thể tải danh sách bạn bè'));
     } finally {
       setLoading(false);
     }
@@ -187,6 +191,13 @@ export default function Friends() {
             <div key={i} className="h-20 bg-bg-card rounded-2xl border border-border-dim animate-pulse" />
           ))}
         </div>
+      ) : error ? (
+        <ErrorFallback
+          error={error}
+          title="Không thể tải danh sách bạn bè"
+          message={error.message}
+          onRetry={fetchFriendships}
+        />
       ) : tab === 'friends' ? (
         friends.length === 0 ? (
           <div className="text-center py-16 bg-bg-card rounded-2xl border border-border-dim">

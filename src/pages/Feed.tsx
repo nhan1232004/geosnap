@@ -7,6 +7,7 @@ import { CreatePost } from '../components/feed/CreatePost';
 import { StoriesBar } from '../components/Stories/StoriesBar';
 import { PostItem } from '../components/feed/PostItem';
 import { useToast } from '../components/ToastContainer';
+import { ErrorFallback } from '../components/ErrorFallback';
 import { Loader2 } from 'lucide-react';
 
 export default function Feed() {
@@ -15,6 +16,7 @@ export default function Feed() {
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [stories, setStories] = useState<(Post & { userProfile?: UserProfile })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
   const [displayLimit, setDisplayLimit] = useState(10);
   const [loadingMore, setLoadingMore] = useState(false);
   const observerRef = useRef<HTMLDivElement>(null);
@@ -22,6 +24,7 @@ export default function Feed() {
   const fetchFeed = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+    setError(null);
     setDisplayLimit(10);
 
     try {
@@ -92,6 +95,7 @@ export default function Feed() {
       setStories(enrichedStories);
     } catch (e: any) {
       console.error('Error fetching feed:', e);
+      setError(e instanceof Error ? e : new Error(e?.message || 'Không thể tải bảng tin'));
       toast('Không thể tải bảng tin: ' + (e?.message || 'Lỗi kết nối'), 'error');
     } finally {
       setLoading(false);
@@ -228,6 +232,14 @@ export default function Feed() {
             <div key={i} className="bg-bg-card border border-border-dim rounded-3xl h-[400px] animate-pulse"></div>
           ))}
         </div>
+      ) : error && feed.length === 0 ? (
+        <ErrorFallback
+          error={error}
+          title="Không thể tải bảng tin"
+          message={error.message || 'Đã có lỗi xảy ra khi kết nối máy chủ.'}
+          onRetry={fetchFeed}
+          className="mt-6"
+        />
       ) : feed.length === 0 ? (
         <div className="text-center py-20 bg-bg-card rounded-3xl border border-border-dim mt-6">
           <div className="text-6xl mb-4">🌍</div>

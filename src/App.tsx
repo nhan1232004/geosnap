@@ -5,6 +5,7 @@ import { api } from './lib/api';
 import { connectSocket, disconnectSocket } from './lib/socket';
 import { ToastProvider, useToast } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { registerToastNotifier } from './lib/asyncErrorHandler';
 import { Sun, Moon, Menu, X } from 'lucide-react';
 import { initializePushNotifications } from './services/notifications';
 
@@ -23,6 +24,7 @@ import Dashboard from './pages/Dashboard';
 import StoryViewer from './pages/StoryViewer';
 import Explore from './pages/Explore';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
+import { OfflineBanner } from './components/OfflineBanner';
 import { UserProfile } from './types';
 
 const NAV_ITEMS = [
@@ -110,6 +112,11 @@ function AppContent() {
     }
   }, [theme]);
 
+  // Register toast instance for asyncErrorHandler
+  useEffect(() => {
+    registerToastNotifier(toast);
+  }, [toast]);
+
   // Initialize push notifications when user is authenticated
   useEffect(() => {
     if (user) {
@@ -187,6 +194,7 @@ function AppContent() {
         !user ? <Navigate to="/login" /> : (
           <div className="flex h-screen overflow-hidden relative">
             <div className="atmosphere" />
+            <OfflineBanner />
 
             {/* Mobile overlay */}
             {sidebarOpen && (
@@ -318,20 +326,22 @@ function AppContent() {
                 </button>
               </div>
 
-              <Routes>
-                <Route path="/" element={<Timeline />} />
-                <Route path="/map" element={<MapViewPage />} />
-                <Route path="/upload" element={<Upload />} />
-                <Route path="/folder/:id" element={<FolderDetail />} />
-                <Route path="/friends" element={<Friends />} />
-                <Route path="/feed" element={<Feed />} />
-                <Route path="/explore" element={<Explore />} />
-                <Route path="/messages" element={<Messages />} />
-                <Route path="/profile/:uid" element={<Profile />} />
-                <Route path="/story-viewer" element={<StoryViewer />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="*" element={<Navigate to="/" />} />
-              </Routes>
+              <ErrorBoundary resetKeys={[location.pathname]} title="Lỗi tải trang">
+                <Routes>
+                  <Route path="/" element={<Timeline />} />
+                  <Route path="/map" element={<MapViewPage />} />
+                  <Route path="/upload" element={<Upload />} />
+                  <Route path="/folder/:id" element={<FolderDetail />} />
+                  <Route path="/friends" element={<Friends />} />
+                  <Route path="/feed" element={<Feed />} />
+                  <Route path="/explore" element={<Explore />} />
+                  <Route path="/messages" element={<Messages />} />
+                  <Route path="/profile/:uid" element={<Profile />} />
+                  <Route path="/story-viewer" element={<StoryViewer />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="*" element={<Navigate to="/" />} />
+                </Routes>
+              </ErrorBoundary>
               <PWAInstallPrompt />
             </main>
 

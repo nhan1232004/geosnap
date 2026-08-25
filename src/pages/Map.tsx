@@ -8,6 +8,7 @@ import { useToast } from '../components/ToastContainer';
 import { LocationFolder, UserProfile } from '../types';
 import { Link } from 'react-router-dom';
 import { Users, User as UserIcon, MapPin, Calendar, Filter, X } from 'lucide-react';
+import { ErrorFallback } from '../components/ErrorFallback';
 
 interface MapFolder extends LocationFolder {
   isMine: boolean;
@@ -69,27 +70,32 @@ export default function MapViewPage() {
   const [friendFolders, setFriendFolders] = useState<MapFolder[]>([]);
   const [showFriends, setShowFriends] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
   const [zoom, setZoom] = useState(5);
   const [timeFilter, setTimeFilter] = useState<'all' | 'week' | 'month' | 'year'>('all');
   const [showMobilePanel, setShowMobilePanel] = useState(false);
 
   // Fetch own folders
-  useEffect(() => {
+  const fetchMine = useCallback(async () => {
     if (!user) return;
-    const fetchMine = async () => {
-      try {
-        const res = await api.get<{ folders: LocationFolder[] }>('/api/v1/folders?limit=1000');
-        const data = res.folders.map(folder => ({ ...folder, isMine: true }));
-        setMyFolders(data);
-      } catch (e) {
-        console.error('Failed to load my folders:', e);
-        toast('Không thể tải dữ liệu bản đồ cá nhân', 'error');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchMine();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<{ folders: LocationFolder[] }>('/api/v1/folders?limit=1000');
+      const data = res.folders.map(folder => ({ ...folder, isMine: true }));
+      setMyFolders(data);
+    } catch (e: any) {
+      console.error('Failed to load my folders:', e);
+      setError(e instanceof Error ? e : new Error(e?.message || 'Không thể tải dữ liệu bản đồ'));
+      toast('Không thể tải dữ liệu bản đồ cá nhân', 'error');
+    } finally {
+      setLoading(false);
+    }
   }, [user, toast]);
+
+  useEffect(() => {
+    fetchMine();
+  }, [fetchMine]);
 
   // Fetch friend folders when toggled
   const fetchFriendFolders = useCallback(async () => {

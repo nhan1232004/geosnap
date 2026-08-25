@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { LocationFolder } from '../types';
 import { useToast } from '../components/ToastContainer';
+import { ErrorFallback } from '../components/ErrorFallback';
 import { TimelineSkeleton } from '../components/LoadingSkeleton';
 import { LazyImagePlaceholder } from '../components/LazyImage';
 import { SearchBox, FolderSearchFilter } from '../components/SearchBox';
@@ -19,6 +20,7 @@ export default function Timeline() {
   const [folders, setFolders] = useState<LocationFolder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -52,27 +54,29 @@ export default function Timeline() {
     }
   }, [user, loadingMore, hasMore, nextCursor, toast]);
 
-  useEffect(() => {
+  const fetchInitial = useCallback(async () => {
     if (!user) return;
-    const fetchInitial = async () => {
-      setLoading(true);
-      try {
-        const res = await api.get<{ folders: LocationFolder[]; nextCursor: string | null }>(
-          `/api/v1/folders?limit=${PAGE_SIZE}`
-        );
-        setFolders(res.folders);
-        setNextCursor(res.nextCursor);
-        setHasMore(res.nextCursor !== null);
-      } catch (err) {
-        console.error('Failed to load initial folders:', err);
-        toast('Không thể tải danh sách hành trình', 'error');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInitial();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<{ folders: LocationFolder[]; nextCursor: string | null }>(
+        `/api/v1/folders?limit=${PAGE_SIZE}`
+      );
+      setFolders(res.folders);
+      setNextCursor(res.nextCursor);
+      setHasMore(res.nextCursor !== null);
+    } catch (err: any) {
+      console.error('Failed to load initial folders:', err);
+      setError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải danh sách hành trình'));
+      toast('Không thể tải danh sách hành trình', 'error');
+    } finally {
+      setLoading(false);
+    }
   }, [user, toast]);
+
+  useEffect(() => {
+    fetchInitial();
+  }, [fetchInitial]);
 
   // Intersection Observer for infinite scroll
   useEffect(() => {
@@ -191,7 +195,14 @@ export default function Timeline() {
         </div>
       )}
 
-      {folders.length === 0 && !isAdding ? (
+      {error && folders.length === 0 ? (
+        <ErrorFallback
+          error={error}
+          title="Không thể tải danh sách địa điểm"
+          message={error.message || 'Đã có lỗi xảy ra khi lấy danh sách hành trình của bạn.'}
+          onRetry={fetchInitial}
+        />
+      ) : folders.length === 0 && !isAdding ? (
         <div className="text-center py-20 bg-bg-card rounded-[20px] border border-border-dim">
           <p className="text-text-dim mb-4">No locations yet.</p>
           <Link to="/upload" className="text-brand hover:text-white transition-colors">Upload some photos</Link>
