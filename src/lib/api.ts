@@ -24,7 +24,6 @@ class ApiClient {
   private refreshSubscribers: ((token: string) => void)[] = [];
 
   constructor() {
-    // Use sessionStorage for better security than localStorage
     const stored = this.getStoredTokens();
     this.token = stored.accessToken;
     this.refreshToken = stored.refreshToken;
@@ -32,7 +31,7 @@ class ApiClient {
 
   private getStoredTokens() {
     try {
-      const stored = sessionStorage.getItem('geosnap_auth');
+      const stored = localStorage.getItem('geosnap_auth') || sessionStorage.getItem('geosnap_auth');
       if (stored) {
         const parsed = JSON.parse(stored);
         return {
@@ -53,15 +52,24 @@ class ApiClient {
     }
 
     if (token) {
-      sessionStorage.setItem(
-        'geosnap_auth',
-        JSON.stringify({
-          accessToken: token,
-          refreshToken: this.refreshToken || null,
-        })
-      );
+      try {
+        localStorage.setItem(
+          'geosnap_auth',
+          JSON.stringify({
+            accessToken: token,
+            refreshToken: this.refreshToken || null,
+          })
+        );
+      } catch (e) {
+        console.warn('localStorage setItem failed:', e);
+      }
     } else {
-      sessionStorage.removeItem('geosnap_auth');
+      try {
+        localStorage.removeItem('geosnap_auth');
+        sessionStorage.removeItem('geosnap_auth');
+      } catch (e) {
+        console.warn('localStorage removeItem failed:', e);
+      }
       this.refreshToken = null;
     }
 

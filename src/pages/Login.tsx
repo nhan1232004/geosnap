@@ -23,15 +23,19 @@ function getFirebaseAuthErrorMessage(code: string, fallback: string): string {
     case 'auth/invalid-credential':
       return 'Email hoặc mật khẩu không chính xác.';
     case 'auth/email-already-in-use':
-      return 'Email này đã được đăng ký trước đó. Vui lòng đăng nhập.';
+      return 'Email này đã được đăng ký trước đó. Vui lòng chọn Đăng nhập.';
     case 'auth/weak-password':
       return 'Mật khẩu quá yếu (tối thiểu 6 ký tự).';
     case 'auth/invalid-email':
       return 'Địa chỉ email không đúng định dạng.';
     case 'auth/network-request-failed':
-      return 'Lỗi kết nối mạng. Vui lòng kiểm tra lại Internet.';
+      return 'Lỗi kết nối mạng. Vui lòng kiểm tra lại kết nối Wifi/4G.';
+    case 'auth/missing-initial-state':
+    case 'auth/popup-blocked':
+    case 'auth/cancelled-popup-request':
+      return 'Trên ứng dụng điện thoại, vui lòng đăng nhập hoặc đăng ký bằng Email bên dưới.';
     case 'auth/too-many-requests':
-      return 'Quá nhiều lần thử thất bại. Vui lòng thử lại sau vài phút.';
+      return 'Quá nhiều lần thử thất bại. Vui lòng đợi 1 phút và thử lại.';
     default:
       return fallback;
   }
