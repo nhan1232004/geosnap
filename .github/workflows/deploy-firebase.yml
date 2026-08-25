@@ -25,10 +25,15 @@ jobs:
       - name: Build Web App (Vite + PWA)
         run: npm run build
 
-      - name: Deploy to Firebase Hosting
+      - name: Deploy to Firebase Hosting (via Service Account)
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEOSNAP_4DD7A != '' }}
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEOSNAP_4DD7A }}'
           channelId: live
           projectId: geosnap-4dd7a
+
+      - name: Deploy to Firebase Hosting (via Token fallback)
+        if: ${{ secrets.FIREBASE_TOKEN != '' && secrets.FIREBASE_SERVICE_ACCOUNT_GEOSNAP_4DD7A == '' }}
+        run: npx firebase-tools deploy --only hosting --token "${{ secrets.FIREBASE_TOKEN }}" --project geosnap-4dd7a
