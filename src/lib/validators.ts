@@ -13,7 +13,6 @@ export const Validators = {
   },
 
   password: (password: string): boolean => {
-    // Minimum 6 characters
     return password.length >= 6;
   },
 

@@ -216,14 +216,13 @@ class ApiClient {
     try {
       return await fn();
     } catch (error: any) {
-      // Retry logic: only for network errors and 5xx status codes
       const isRetryable =
         error.message?.includes('timeout') ||
         error.message?.includes('Failed to fetch') ||
         (error.status && error.status >= 500);
 
       if (attempt < this.MAX_RETRIES && isRetryable) {
-        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 1s, 2s, 4s
+        const delay = Math.pow(2, attempt) * 1000;
         console.log(`Retrying after ${delay}ms (attempt ${attempt + 1}/${this.MAX_RETRIES})`);
         await new Promise(resolve => setTimeout(resolve, delay));
         return this.retryWithBackoff(fn, attempt + 1);
@@ -287,7 +286,7 @@ class ApiClient {
 
       const response = await this.fetchWithTimeout(`${BASE_URL}${path}`, {
         method: 'POST',
-        headers: this.getHeaders(null), // fetch sets the boundaries automatically
+        headers: this.getHeaders(null),
         body: formData,
       });
       return this.handleResponse<{ url: string }>(response);
@@ -309,7 +308,6 @@ class ApiClient {
 
 export const api = new ApiClient();
 
-// Listen for token changes
 tokenRefreshEvent.addEventListener('tokenChanged', (event: any) => {
   console.log('[API] Token updated');
 });

@@ -56,7 +56,6 @@ export function logError(error: any, context?: string) {
   const contextStr = context ? ` [${context}]` : '';
   console.error(`Error${contextStr}:`, message, error);
 
-  // Send to error tracking service (e.g., Sentry) in production
   if (typeof window !== 'undefined' && (window as any).Sentry) {
     (window as any).Sentry.captureException(error, {
       tags: { context },
