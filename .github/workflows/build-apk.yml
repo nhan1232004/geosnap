@@ -32,12 +32,20 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Setup google-services.json if provided
-        if: ${{ secrets.GOOGLE_SERVICES_JSON != '' }}
-        run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > android/app/google-services.json
+        env:
+          GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES" ]; then
+            echo "$GOOGLE_SERVICES" | base64 -d > android/app/google-services.json
+          fi
 
       - name: Setup Keystore if secret provided
-        if: ${{ secrets.ANDROID_KEYSTORE != '' }}
-        run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > android/app/release.keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+          fi
 
       - name: Build web assets
         run: npm run build
