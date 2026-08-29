@@ -15,7 +15,7 @@ import {
   togglePostReactionDoc,
   uploadImageFile,
   updateFolderDoc,
-  getUserFoldersOptimized,
+  getUserPublicFolders,
   getFriendsList,
 } from '../lib/firestoreService';
 
@@ -40,7 +40,7 @@ export default function Feed() {
       // Parallel fetch posts feed, friends' folders and active stories from Firestore
       const [postsList, storiesList, friends] = await Promise.all([
         getUserFeedOptimized(user.uid, 50),
-        getActiveStories(),
+        getActiveStories(user.uid),
         getFriendsList(user.uid),
       ]);
 
@@ -53,16 +53,19 @@ export default function Feed() {
 
       const friendFolders: FeedItem[] = [];
       for (const friend of friends) {
-        const folders = await getUserFoldersOptimized(friend.uid, 10);
-        const publicOrFriends = folders.filter((f) => f.visibility !== 'private');
-        publicOrFriends.forEach((f) => {
-          friendFolders.push({
-            id: f.id || '',
-            type: 'folder' as const,
-            data: { ...f, userProfile: friend },
-            createdAt: f.createdAt,
+        try {
+          const folders = await getUserPublicFolders(friend.uid, 10);
+          folders.forEach((f) => {
+            friendFolders.push({
+              id: f.id || '',
+              type: 'folder' as const,
+              data: { ...f, userProfile: friend },
+              createdAt: f.createdAt,
+            });
           });
-        });
+        } catch (folderErr) {
+          console.warn(`Could not load folders for friend ${friend.uid}:`, folderErr);
+        }
       }
 
       const combined = [...mappedPosts, ...friendFolders];

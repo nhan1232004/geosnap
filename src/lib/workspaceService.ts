@@ -12,6 +12,8 @@ import {
   writeBatch,
   serverTimestamp,
   Timestamp,
+  onSnapshot,
+  Unsubscribe,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import type { Workspace, Page, Block, PageTreeNode } from '../types';
@@ -368,4 +370,27 @@ export async function reorderBlocks(pageId: string, blockIds: string[]): Promise
     batch.update(doc(db, 'blocks', id), { order: (index + 1) * 1000 });
   });
   await batch.commit();
+}
+
+export function subscribePageBlocks(
+  pageId: string,
+  callback: (blocks: Block[]) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, 'blocks'),
+    where('pageId', '==', pageId)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const blocks = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Block);
+      blocks.sort((a, b) => (a.order || 0) - (b.order || 0));
+      callback(blocks);
+    },
+    (err) => {
+      console.warn(`subscribePageBlocks error for page ${pageId}:`, err);
+      if (onError) onError(err);
+    }
+  );
 }

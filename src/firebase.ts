@@ -10,7 +10,12 @@ import {
   getAuth,
   Auth,
 } from 'firebase/auth';
-import { initializeFirestore, getFirestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -46,6 +51,9 @@ let dbInstance;
 try {
   dbInstance = initializeFirestore(app, {
     ignoreUndefinedProperties: true,
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
   });
 } catch {
   dbInstance = getFirestore(app);

@@ -48,10 +48,44 @@ export async function getUserFoldersOptimized(
     return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as LocationFolder);
   } catch {
     // Fallback without index
-    const qFallback = query(collection(db, 'folders'), where('uid', '==', userId));
-    const docs = await getDocs(qFallback);
+    try {
+      const qFallback = query(collection(db, 'folders'), where('uid', '==', userId));
+      const docs = await getDocs(qFallback);
+      const items = docs.docs.map((d) => ({ id: d.id, ...d.data() }) as LocationFolder);
+      return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } catch {
+      return [];
+    }
+  }
+}
+
+export async function getUserPublicFolders(
+  userId: string,
+  pageSize: number = 20
+): Promise<LocationFolder[]> {
+  try {
+    const q = query(
+      collection(db, 'folders'),
+      where('uid', '==', userId),
+      where('visibility', 'in', ['public', 'friends']),
+      limit(pageSize)
+    );
+    const docs = await getDocs(q);
     const items = docs.docs.map((d) => ({ id: d.id, ...d.data() }) as LocationFolder);
     return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (err) {
+    try {
+      const qPublic = query(
+        collection(db, 'folders'),
+        where('uid', '==', userId),
+        where('visibility', '==', 'public'),
+        limit(pageSize)
+      );
+      const docs = await getDocs(qPublic);
+      return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as LocationFolder);
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -156,28 +190,40 @@ export async function getUserFeedOptimized(
   pageSize: number = 30
 ): Promise<Post[]> {
   try {
-    const q = query(
+    // 1. Query public posts
+    const qPublic = query(
       collection(db, 'posts'),
-      where('visibility', 'in', ['public', 'friends']),
-      orderBy('createdAt', 'desc'),
+      where('visibility', '==', 'public'),
       limit(pageSize)
     );
-    const docs = await getDocs(q);
-    return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
-  } catch (err) {
-    console.warn('getUserFeedOptimized query failed, falling back to public posts only:', err);
-    try {
-      const qPublic = query(
-        collection(db, 'posts'),
-        where('visibility', '==', 'public'),
-        limit(pageSize)
-      );
-      const docs = await getDocs(qPublic);
-      const items = docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
-      return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    } catch {
-      return [];
+    const publicDocs = await getDocs(qPublic);
+    const postsMap = new Map<string, Post>();
+    publicDocs.docs.forEach((d) => {
+      postsMap.set(d.id, { id: d.id, ...d.data() } as Post);
+    });
+
+    // 2. Also fetch user's own posts
+    if (userId) {
+      try {
+        const qMy = query(
+          collection(db, 'posts'),
+          where('uid', '==', userId),
+          limit(pageSize)
+        );
+        const myDocs = await getDocs(qMy);
+        myDocs.docs.forEach((d) => {
+          postsMap.set(d.id, { id: d.id, ...d.data() } as Post);
+        });
+      } catch {
+        // Fallback gracefully
+      }
     }
+
+    const items = Array.from(postsMap.values());
+    return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (err) {
+    console.warn('getUserFeedOptimized failed:', err);
+    return [];
   }
 }
 
@@ -213,21 +259,51 @@ export async function deletePostDoc(postId: string): Promise<void> {
   await deleteDoc(doc(db, 'posts', postId));
 }
 
-export async function getActiveStories(): Promise<Post[]> {
+export async function getActiveStories(userId?: string): Promise<Post[]> {
   const now = new Date().toISOString();
   try {
-    const q = query(
+    // Query public active stories
+    const qPublic = query(
       collection(db, 'posts'),
       where('type', '==', 'story'),
-      where('expiresAt', '>', now),
-      orderBy('expiresAt', 'desc')
+      where('visibility', '==', 'public'),
+      where('expiresAt', '>', now)
     );
-    const docs = await getDocs(q);
-    return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
-  } catch {
-    const qFallback = query(collection(db, 'posts'), where('type', '==', 'story'));
-    const docs = await getDocs(qFallback);
-    return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
+    const docs = await getDocs(qPublic);
+    const publicStories = docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
+
+    // If userId is provided, also include user's own active stories
+    if (userId) {
+      try {
+        const qMy = query(
+          collection(db, 'posts'),
+          where('type', '==', 'story'),
+          where('uid', '==', userId),
+          where('expiresAt', '>', now)
+        );
+        const myDocs = await getDocs(qMy);
+        const myStories = myDocs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
+        const combined = [...myStories, ...publicStories.filter((s) => s.uid !== userId)];
+        return combined.sort((a, b) => (b.expiresAt || '').localeCompare(a.expiresAt || ''));
+      } catch {
+        return publicStories;
+      }
+    }
+
+    return publicStories.sort((a, b) => (b.expiresAt || '').localeCompare(a.expiresAt || ''));
+  } catch (err) {
+    console.warn('getActiveStories query failed, falling back:', err);
+    try {
+      const qFallback = query(
+        collection(db, 'posts'),
+        where('type', '==', 'story'),
+        where('visibility', '==', 'public')
+      );
+      const fallbackDocs = await getDocs(qFallback);
+      return fallbackDocs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
+    } catch {
+      return [];
+    }
   }
 }
 

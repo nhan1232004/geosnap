@@ -36,6 +36,7 @@ import {
   deleteBlock,
   reorderBlocks,
   flattenPageTree,
+  subscribePageBlocks,
 } from '../lib/workspaceService';
 import type { Page, Block, BlockType, PageTreeNode, Workspace } from '../types';
 
@@ -272,14 +273,27 @@ export default function WorkspacePage() {
   }, [workspace?.id, setActivePage, addToRecent, setPageTree, flushPendingUpdates]);
 
   useEffect(() => {
-    if (paramPageId) {
-      refreshPageData(paramPageId);
-    } else {
+    if (!paramPageId) {
       setCurrentPage(null);
       setActivePage(null);
       setAncestors([]);
       setChildPages([]);
+      return;
     }
+
+    refreshPageData(paramPageId);
+
+    // Subscribe to realtime block updates
+    const unsubscribe = subscribePageBlocks(paramPageId, (incomingBlocks) => {
+      // Only sync from remote if user has no pending debounced keystrokes
+      if (pendingBlockUpdatesRef.current.size === 0 && incomingBlocks.length > 0) {
+        setBlocks(incomingBlocks);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [paramPageId, refreshPageData, setActivePage]);
 
   // Handle Page Title Change with Debounce (WS-03)
