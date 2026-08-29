@@ -3,7 +3,6 @@ import { GoogleGenAI } from '@google/genai';
 function getApiKey(): string | null {
   return (
     import.meta.env.VITE_GEMINI_API_KEY ||
-    (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : null) ||
     localStorage.getItem('geosnap_gemini_api_key') ||
     null
   );

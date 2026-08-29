@@ -1,8 +1,6 @@
 import { useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from './store/useAppStore';
-import { api } from './lib/api';
-import { connectSocket, disconnectSocket } from './lib/socket';
 import { ToastProvider, useToast } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { registerToastNotifier } from './lib/asyncErrorHandler';
@@ -41,14 +39,6 @@ import { UserProfile } from './types';
 
 const NAV_ITEMS = [
   {
-    to: '/workspace', label: 'Workspace', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
-        <path d="M6 6h10"/><path d="M6 10h10"/>
-      </svg>
-    )
-  },
-  {
     to: '/', label: 'Timeline', icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -61,6 +51,14 @@ const NAV_ITEMS = [
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
         <line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>
+      </svg>
+    )
+  },
+  {
+    to: '/workspace', label: 'Workspace', icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+        <path d="M6 6h10"/><path d="M6 10h10"/>
       </svg>
     )
   },
@@ -152,16 +150,11 @@ function AppContent() {
       if (!firebaseUser) {
         setUser(null);
         setUserProfile(null);
-        api.setToken(null);
-        disconnectSocket();
         setAuthLoaded(true);
         return;
       }
 
       try {
-        const token = await firebaseUser.getIdToken();
-        api.setToken(token);
-
         let profile: UserProfile | null = null;
         try {
           const docSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
@@ -190,7 +183,6 @@ function AppContent() {
           avatarUrl: profile.avatarUrl,
         });
         setUserProfile(profile);
-        connectSocket(token);
       } catch (err) {
         console.error('Failed to process auth state:', err);
       } finally {
@@ -207,8 +199,6 @@ function AppContent() {
     } catch (e) {
       console.error('Logout error:', e);
     }
-    api.setToken(null);
-    disconnectSocket();
     setUser(null);
     setUserProfile(null);
     navigate('/login');

@@ -20,6 +20,7 @@ export interface Photo {
   uploadedAt: string;
   hasGps: boolean;
   folderId?: string;
+  visibility?: 'private' | 'friends' | 'public';
 }
 
 export interface LocationFolder {

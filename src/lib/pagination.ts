@@ -1,1 +1,101 @@
-// Pagination utilities for efficient data loading\n\nexport interface PaginationOptions {\n  pageSize: number;\n  startAfter?: any; // Last document snapshot\n}\n\nexport interface PaginatedResponse<T> {\n  items: T[];\n  nextCursor: any | null;\n  hasMore: boolean;\n  total?: number;\n}\n\n/**\n * Create pagination cursor from document\n */\nexport function createCursor(doc: any): any {\n  return doc; // In practice, this would be a Firestore DocumentSnapshot\n}\n\n/**\n * Check if more pages exist\n */\nexport function hasMorePages<T>(response: PaginatedResponse<T>): boolean {\n  return response.hasMore && response.nextCursor !== null;\n}\n\n/**\n * Flatten paginated responses\n */\nexport function flattenPaginatedResponses<T>(\n  responses: PaginatedResponse<T>[]\n): T[] {\n  return responses.flatMap(response => response.items);\n}\n\n/**\n * Merge paginated data with cache\n */\nexport function mergePaginatedData<T>(\n  cachedItems: T[],\n  newResponse: PaginatedResponse<T>,\n  key: string = 'id'\n): T[] {\n  const itemMap = new Map<string, T>();\n  \n  // Add cached items\n  cachedItems.forEach(item => {\n    const k = (item as any)[key];\n    itemMap.set(k, item);\n  });\n  \n  // Add/update with new items\n  newResponse.items.forEach(item => {\n    const k = (item as any)[key];\n    itemMap.set(k, item);\n  });\n  \n  return Array.from(itemMap.values());\n}\n\n/**\n * Deduplicate items by key\n */\nexport function deduplicateItems<T>(\n  items: T[],\n  key: string = 'id'\n): T[] {\n  const seen = new Set<string>();\n  return items.filter(item => {\n    const k = (item as any)[key];\n    if (seen.has(k)) return false;\n    seen.add(k);\n    return true;\n  });\n}\n\n/**\n * Sort paginated items by date descending (most recent first)\n */\nexport function sortByDateDesc<T>(\n  items: T[],\n  dateKey: string = 'createdAt'\n): T[] {\n  return [...items].sort((a, b) => {\n    const dateA = new Date((a as any)[dateKey]).getTime();\n    const dateB = new Date((b as any)[dateKey]).getTime();\n    return dateB - dateA;\n  });\n}\n\n/**\n * Filter items by predicate\n */\nexport function filterItems<T>(\n  items: T[],\n  predicate: (item: T) => boolean\n): T[] {\n  return items.filter(predicate);\n}\n"
+// Pagination utilities for efficient data loading
+
+export interface PaginationOptions {
+  pageSize: number;
+  startAfter?: any; // Last document snapshot
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  nextCursor: any | null;
+  hasMore: boolean;
+  total?: number;
+}
+
+/**
+ * Create pagination cursor from document
+ */
+export function createCursor(doc: any): any {
+  return doc; // In practice, this would be a Firestore DocumentSnapshot
+}
+
+/**
+ * Check if more pages exist
+ */
+export function hasMorePages<T>(response: PaginatedResponse<T>): boolean {
+  return response.hasMore && response.nextCursor !== null;
+}
+
+/**
+ * Flatten paginated responses
+ */
+export function flattenPaginatedResponses<T>(
+  responses: PaginatedResponse<T>[]
+): T[] {
+  return responses.flatMap(response => response.items);
+}
+
+/**
+ * Merge paginated data with cache
+ */
+export function mergePaginatedData<T>(
+  cachedItems: T[],
+  newResponse: PaginatedResponse<T>,
+  key: string = 'id'
+): T[] {
+  const itemMap = new Map<string, T>();
+  
+  // Add cached items
+  cachedItems.forEach(item => {
+    const k = (item as any)[key];
+    itemMap.set(k, item);
+  });
+  
+  // Add/update with new items
+  newResponse.items.forEach(item => {
+    const k = (item as any)[key];
+    itemMap.set(k, item);
+  });
+  
+  return Array.from(itemMap.values());
+}
+
+/**
+ * Deduplicate items by key
+ */
+export function deduplicateItems<T>(
+  items: T[],
+  key: string = 'id'
+): T[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const k = (item as any)[key];
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/**
+ * Sort paginated items by date descending (most recent first)
+ */
+export function sortByDateDesc<T>(
+  items: T[],
+  dateKey: string = 'createdAt'
+): T[] {
+  return [...items].sort((a, b) => {
+    const dateA = new Date((a as any)[dateKey]).getTime();
+    const dateB = new Date((b as any)[dateKey]).getTime();
+    return dateB - dateA;
+  });
+}
+
+/**
+ * Filter items by predicate
+ */
+export function filterItems<T>(
+  items: T[],
+  predicate: (item: T) => boolean
+): T[] {
+  return items.filter(predicate);
+}

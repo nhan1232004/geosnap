@@ -7,6 +7,7 @@ import { useToast } from '../components/ToastContainer';
 import { findMatchingFolder } from '../lib/clustering';
 import { reverseGeocode } from '../lib/geocoding';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { LocationFolder } from '../types';
 import {
   getUserFoldersOptimized,
   createFolderDoc,
@@ -56,46 +57,13 @@ function resizeImageToBlob(file: File, maxWidth: number, maxHeight: number): Pro
   });
 }
 
-function resizeImageToDataUrl(file: File, maxWidth: number, maxHeight: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > height) {
-          if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
-        } else {
-          if (height > maxHeight) { width = Math.round((width * maxHeight) / height); height = maxHeight; }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject('No context');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-      img.onerror = reject;
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 async function uploadToStorage(userId: string, file: File, blob: Blob): Promise<string> {
-  try {
-    const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    const fileToUpload = new File([blob], filename, { type: 'image/jpeg' });
-    return await uploadImageFile(fileToUpload, `photos/${userId}/${filename}`);
-  } catch (err) {
-    console.warn('Firebase storage upload failed, falling back to data URL:', err);
-    return await resizeImageToDataUrl(file, 800, 800);
-  }
+  const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+  const fileToUpload = new File([blob], filename, { type: 'image/jpeg' });
+  return await uploadImageFile(fileToUpload, `photos/${userId}/${filename}`);
 }
 
-type ManualItem = { file?: File, url: string, name: string, takenAt: string };
+type ManualItem = { id: string; file?: File; url: string; name: string; takenAt: string };
 
 const formatForInput = (isoString: string) => {
   try {
@@ -132,7 +100,7 @@ export default function Upload() {
   const [progress, setProgress] = useState<{ [key: string]: number }>({});
   const [statusText, setStatusText] = useState('Select photos or drag and drop');
   const [manualQueue, setManualQueue] = useState<ManualItem[]>([]);
-  const [folders, setFolders] = useState<{id: string, name: string, centerLat: number, centerLng: number, photoCount: number, coverPhotoUrl?: string}[]>([]);
+  const [folders, setFolders] = useState<LocationFolder[]>([]);
   const [pickingItem, setPickingItem] = useState<ManualItem | null>(null);
   const [pickedPos, setPickedPos] = useState<{lat: number, lng: number} | null>(null);
   const [customLocationName, setCustomLocationName] = useState('');
@@ -142,20 +110,18 @@ export default function Upload() {
     const fetchFolders = async () => {
       try {
         const userFolders = await getUserFoldersOptimized(user.uid, 100);
-        setFolders(userFolders.map(f => ({
-          id: f.id || '',
-          name: f.name,
-          centerLat: f.centerLat,
-          centerLng: f.centerLng,
-          photoCount: f.photoCount,
-          coverPhotoUrl: f.coverPhotoUrl,
-        })));
+        setFolders(userFolders);
       } catch (e) {
         console.error('Failed to fetch folders:', e);
       }
     };
     fetchFolders();
   }, [user]);
+
+  const handleSkip = (item: ManualItem) => {
+    setManualQueue(prev => prev.filter(i => i.id !== item.id));
+    setProgress(prev => ({ ...prev, [item.name]: -2 }));
+  };
 
   const handleAssign = async (item: ManualItem, folderId: string) => {
     if (!user) return;
@@ -169,55 +135,44 @@ export default function Upload() {
         latitude: folder.centerLat,
         longitude: folder.centerLng,
         takenAt: item.takenAt,
-        hasGps: true,
+        hasGps: false,
         folderId: folder.id,
+        visibility: 'private',
         uploadedAt: new Date().toISOString(),
       });
 
       const newCover = folder.coverPhotoUrl || item.url;
+      const newCount = (folder.photoCount || 0) + 1;
       await updateFolderDoc(folder.id, {
-        photoCount: folder.photoCount + 1,
+        photoCount: newCount,
         coverPhotoUrl: newCover,
       });
 
-      setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, photoCount: f.photoCount + 1, coverPhotoUrl: newCover } : f));
-
+      setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, photoCount: newCount, coverPhotoUrl: newCover } : f));
+      setManualQueue(prev => prev.filter(i => i.id !== item.id));
+      setProgress(prev => ({ ...prev, [item.name]: 100 }));
+      toast(`Đã gán ${item.name} vào ${folder.name}`, 'success');
     } catch (err) {
       console.error(err);
-      toast(`Không thể gán ảnh: ${item.name}`, 'error');
-    } finally {
-      setManualQueue(prev => prev.filter(i => i.name !== item.name));
-      setProgress(prev => ({ ...prev, [item.name]: 100 }));
+      toast('Không thể gán ảnh vào thư mục', 'error');
     }
   };
 
-  const handleSkip = (item: ManualItem) => {
-    setManualQueue(prev => prev.filter(i => i.name !== item.name));
-    setProgress(prev => ({ ...prev, [item.name]: -2 }));
-  };
+  const handleSaveLocation = async () => {
+    if (!user || !pickingItem || !pickedPos) return;
 
-  const handleDateChange = (itemName: string, val: string) => {
-    if (!val) return;
     try {
-      const iso = new Date(val).toISOString();
-      setManualQueue(prev => prev.map(i => i.name === itemName ? { ...i, takenAt: iso } : i));
-    } catch (e) {
-      // ignore
-    }
-  };
+      let finalName = customLocationName.trim();
+      if (!finalName) {
+        finalName = await reverseGeocode(pickedPos.lat, pickedPos.lng);
+      }
 
-  const handleMapConfirm = async () => {
-    if (!pickingItem || !pickedPos || !user) return;
-    const { lat, lng } = pickedPos;
-    
-    try {
-      let matchingFolder = findMatchingFolder(lat, lng, folders);
-      let folderId: string;
+      let matchingFolder = findMatchingFolder(pickedPos.lat, pickedPos.lng, folders);
 
-      if (matchingFolder && !customLocationName) {
+      if (matchingFolder) {
         const newCount = matchingFolder.photoCount + 1;
-        const newLat = ((matchingFolder.centerLat * matchingFolder.photoCount) + lat) / newCount;
-        const newLng = ((matchingFolder.centerLng * matchingFolder.photoCount) + lng) / newCount;
+        const newLat = ((matchingFolder.centerLat * matchingFolder.photoCount) + pickedPos.lat) / newCount;
+        const newLng = ((matchingFolder.centerLng * matchingFolder.photoCount) + pickedPos.lng) / newCount;
         const newCover = matchingFolder.coverPhotoUrl || pickingItem.url;
 
         await updateFolderDoc(matchingFolder.id, {
@@ -225,42 +180,61 @@ export default function Upload() {
           centerLng: newLng,
           photoCount: newCount,
           coverPhotoUrl: newCover,
+          name: finalName || matchingFolder.name
         });
 
-        setFolders(prev => prev.map(f => f.id === matchingFolder!.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: newCover} : f));
-        folderId = matchingFolder.id;
+        setFolders(prev => prev.map(f => f.id === matchingFolder!.id ? {
+          ...f,
+          photoCount: newCount,
+          centerLat: newLat,
+          centerLng: newLng,
+          coverPhotoUrl: newCover,
+          name: finalName || f.name
+        } : f));
       } else {
-        const name = customLocationName.trim() || await reverseGeocode(lat, lng);
         const newFolder = await createFolderDoc({
           uid: user.uid,
-          name,
-          centerLat: lat,
-          centerLng: lng,
+          name: finalName,
+          centerLat: pickedPos.lat,
+          centerLng: pickedPos.lng,
           coverPhotoUrl: pickingItem.url,
           photoCount: 1,
           createdAt: new Date().toISOString(),
           visibility: 'private',
         });
-        folderId = newFolder.id || '';
-        setFolders(prev => [...prev, { id: folderId, name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: pickingItem.url }]);
+        const createdFolder: LocationFolder = {
+          id: newFolder.id || '',
+          name: finalName,
+          centerLat: pickedPos.lat,
+          centerLng: pickedPos.lng,
+          photoCount: 1,
+          coverPhotoUrl: pickingItem.url,
+          uid: user.uid,
+          createdAt: new Date().toISOString(),
+          visibility: 'private',
+        };
+        matchingFolder = createdFolder;
+        setFolders(prev => [...prev, createdFolder]);
       }
 
       await createPhotoDoc({
         uid: user.uid,
         url: pickingItem.url,
-        latitude: lat,
-        longitude: lng,
+        latitude: pickedPos.lat,
+        longitude: pickedPos.lng,
         takenAt: pickingItem.takenAt,
         hasGps: true,
-        folderId,
+        folderId: matchingFolder.id,
+        visibility: 'private',
         uploadedAt: new Date().toISOString(),
       });
 
+      toast(`Đã gán vị trí cho ${pickingItem.name}`, 'success');
     } catch (err) {
       console.error(err);
       toast('Không thể lưu vị trí. Vui lòng thử lại.', 'error');
     } finally {
-      setManualQueue(prev => prev.filter(i => i.name !== pickingItem.name));
+      setManualQueue(prev => prev.filter(i => i.id !== pickingItem.id));
       setProgress(prev => ({ ...prev, [pickingItem.name]: 100 }));
       setPickingItem(null);
       setPickedPos(null);
@@ -268,16 +242,16 @@ export default function Upload() {
     }
   };
 
-  const processFile = async (file: File) => {
-    if (!user) return;
+  const processFileWithFolderState = async (file: File, activeFolders: LocationFolder[]): Promise<LocationFolder | null> => {
+    if (!user) return null;
     
     setProgress(prev => ({ ...prev, [file.name]: 10 }));
     let lat = 0, lng = 0, takenAt = new Date().toISOString(), hasGps = false;
     
-    // Fast EXIF parsing with 500ms timeout
+    // Robust EXIF parsing with 4000ms timeout
     try {
       const exifPromise = exifr.parse(file, { gps: true, tiff: false, exif: true });
-      const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 500));
+      const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 4000));
       const exifData = await Promise.race([exifPromise, timeoutPromise]) as any;
 
       if (exifData && exifData.latitude && exifData.longitude) {
@@ -302,12 +276,13 @@ export default function Upload() {
       setProgress(prev => ({ ...prev, [file.name]: 85 }));
 
       if (!hasGps) {
-        setManualQueue(prev => [...prev, { file, url, name: file.name, takenAt }]);
+        const uniqueId = crypto.randomUUID();
+        setManualQueue(prev => [...prev, { id: uniqueId, file, url, name: file.name, takenAt }]);
         setProgress(prev => ({ ...prev, [file.name]: -1 }));
-        return;
+        return null;
       }
 
-      let matchingFolder = findMatchingFolder(lat, lng, folders);
+      let matchingFolder = findMatchingFolder(lat, lng, activeFolders);
 
       if (matchingFolder) {
         const newCount = matchingFolder.photoCount + 1;
@@ -322,7 +297,30 @@ export default function Upload() {
           coverPhotoUrl: newCover,
         });
 
-        setFolders(prev => prev.map(f => f.id === matchingFolder!.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: newCover} : f));
+        const updatedFolder = {
+          ...matchingFolder,
+          photoCount: newCount,
+          centerLat: newLat,
+          centerLng: newLng,
+          coverPhotoUrl: newCover,
+        };
+
+        setFolders(prev => prev.map(f => f.id === matchingFolder!.id ? updatedFolder : f));
+
+        await createPhotoDoc({
+          uid: user.uid,
+          url,
+          latitude: lat,
+          longitude: lng,
+          takenAt,
+          hasGps: true,
+          folderId: matchingFolder.id,
+          visibility: matchingFolder.visibility || 'private',
+          uploadedAt: new Date().toISOString(),
+        });
+
+        setProgress(prev => ({ ...prev, [file.name]: 100 }));
+        return updatedFolder;
       } else {
         const name = await reverseGeocode(lat, lng);
         const newFolder = await createFolderDoc({
@@ -335,26 +333,39 @@ export default function Upload() {
           createdAt: new Date().toISOString(),
           visibility: 'private',
         });
-        matchingFolder = { id: newFolder.id || '', photoCount: 1, centerLat: lat, centerLng: lng, coverPhotoUrl: url, name };
-        setFolders(prev => [...prev, { id: newFolder.id || '', name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: url }]);
+        const createdFolder: LocationFolder = {
+          id: newFolder.id || '',
+          name,
+          centerLat: lat,
+          centerLng: lng,
+          photoCount: 1,
+          coverPhotoUrl: url,
+          uid: user.uid,
+          createdAt: new Date().toISOString(),
+          visibility: 'private'
+        };
+        setFolders(prev => [...prev, createdFolder]);
+
+        await createPhotoDoc({
+          uid: user.uid,
+          url,
+          latitude: lat,
+          longitude: lng,
+          takenAt,
+          hasGps: true,
+          folderId: newFolder.id,
+          visibility: 'private',
+          uploadedAt: new Date().toISOString(),
+        });
+
+        setProgress(prev => ({ ...prev, [file.name]: 100 }));
+        return createdFolder;
       }
-
-      await createPhotoDoc({
-        uid: user.uid,
-        url,
-        latitude: lat,
-        longitude: lng,
-        takenAt,
-        hasGps: true,
-        folderId: matchingFolder.id,
-        uploadedAt: new Date().toISOString(),
-      });
-
-      setProgress(prev => ({ ...prev, [file.name]: 100 }));
     } catch (err) {
       console.error(err);
       toast(`Không thể tải lên ${file.name}`, 'error');
       setProgress(prev => ({ ...prev, [file.name]: -2 }));
+      return null;
     }
   };
 
@@ -383,11 +394,18 @@ export default function Upload() {
     setProgress(initialProgress);
 
     try {
-      // Chunk into batches of 3 for smooth parallel processing without memory spikes
-      const CHUNK_SIZE = 3;
-      for (let i = 0; i < acceptedFiles.length; i += CHUNK_SIZE) {
-        const chunk = acceptedFiles.slice(i, i + CHUNK_SIZE);
-        await Promise.all(chunk.map(processFile));
+      // Process sequentially with synchronized folder state to prevent duplicate folders
+      const currentFolderState = [...folders];
+      for (const file of acceptedFiles) {
+        const folderResult = await processFileWithFolderState(file, currentFolderState);
+        if (folderResult) {
+          const idx = currentFolderState.findIndex(f => f.id === folderResult.id);
+          if (idx >= 0) {
+            currentFolderState[idx] = folderResult;
+          } else {
+            currentFolderState.push(folderResult);
+          }
+        }
       }
       setStatusText('Tải lên hoàn tất!');
       toast(`Tải lên thành công ${acceptedFiles.length} ảnh`, 'success');
@@ -457,7 +475,7 @@ export default function Upload() {
 
           <div className="grid grid-cols-1 gap-3">
             {manualQueue.map(item => (
-              <div key={item.name} className="flex flex-col sm:flex-row gap-4 p-3.5 rounded-2xl border border-brand/20 bg-bg-card backdrop-blur-md shadow-sm">
+              <div key={item.id} className="flex flex-col sm:flex-row gap-4 p-3.5 rounded-2xl border border-brand/20 bg-bg-card backdrop-blur-md shadow-sm">
                 <img src={item.url} className="w-24 h-24 sm:w-28 sm:h-28 object-cover rounded-xl shrink-0" alt={item.name} />
                 <div className="flex-1 min-w-0 flex flex-col justify-between">
                   <div>
@@ -603,7 +621,7 @@ export default function Upload() {
                   Hủy
                 </button>
                 <button 
-                  onClick={handleMapConfirm} 
+                  onClick={handleSaveLocation} 
                   disabled={!pickedPos} 
                   className="flex-1 sm:flex-none px-6 py-2 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >

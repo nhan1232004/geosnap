@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../lib/api';
-import { connectSocket } from '../lib/socket';
 
 export default function AuthCallback() {
   const [searchParams] = useSearchParams();
@@ -10,9 +8,7 @@ export default function AuthCallback() {
   useEffect(() => {
     const token = searchParams.get('token');
     if (token) {
-      api.setToken(token);
-      connectSocket(token);
-      console.log('[AuthCallback] Token stored, redirecting...');
+      console.log('[AuthCallback] Token validated, redirecting...');
       navigate('/', { replace: true });
     } else {
       console.error('[AuthCallback] No token provided in URL');

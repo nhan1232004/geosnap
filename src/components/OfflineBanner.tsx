@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { WifiOff, RefreshCw, CheckCircle2 } from 'lucide-react';
-import { subscribeOnlineStatus, syncOfflineQueue, getOfflineQueue } from '../lib/offlineManager';
-import { api } from '../lib/api';
+import { subscribeOnlineStatus, getOfflineQueue } from '../lib/offlineManager';
 import { useToast } from './ToastContainer';
 
 export const OfflineBanner: React.FC = () => {
@@ -19,24 +18,9 @@ export const OfflineBanner: React.FC = () => {
       setOnline(isNowOnline);
 
       if (isNowOnline) {
-        const queue = getOfflineQueue();
-        if (queue.length > 0) {
-          setIsSyncing(true);
-          try {
-            const { synced, failed } = await syncOfflineQueue(api);
-            if (synced > 0) {
-              setJustSynced(true);
-              toast(`Đã đồng bộ ${synced} thay đổi khi kết nối mạng trở lại!`, 'success');
-              setTimeout(() => setJustSynced(false), 4000);
-            }
-            if (failed > 0) {
-              toast(`${failed} thay đổi chưa thể đồng bộ. Sẽ thử lại sau.`, 'warning');
-            }
-          } finally {
-            setIsSyncing(false);
-            setPendingCount(getOfflineQueue().length);
-          }
-        }
+        setJustSynced(true);
+        toast('Đã kết nối lại Internet!', 'success');
+        setTimeout(() => setJustSynced(false), 4000);
       } else {
         toast('Bạn đang ở chế độ ngoại tuyến (Offline)', 'warning');
       }

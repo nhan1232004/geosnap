@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { api } from '../lib/api';
-import { connectSocket } from '../lib/socket';
 import { Eye, EyeOff, MapPin, Camera, Globe, Users, ArrowLeft, Mail } from 'lucide-react';
 import {
   signInWithEmailAndPassword,
@@ -79,8 +77,6 @@ export default function Login() {
     setError(''); setLoading(true);
     try {
       const cred = await signInWithPopup(auth, googleProvider);
-      const token = await cred.user.getIdToken();
-      api.setToken(token);
 
       const userDocRef = doc(db, 'users', cred.user.uid);
       const userDoc = await getDoc(userDocRef);
@@ -107,7 +103,6 @@ export default function Login() {
         avatarUrl: profile.avatarUrl,
       });
       setUserProfile(profile);
-      connectSocket(token);
     } catch (err: any) {
       console.error('Google Sign In Error:', err);
       setError(getFirebaseAuthErrorMessage(err.code, 'Đăng nhập Google không thành công.'));
@@ -123,8 +118,6 @@ export default function Login() {
     setError(''); setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      const token = await cred.user.getIdToken();
-      api.setToken(token);
 
       let profile: UserProfile;
       try {
@@ -157,7 +150,6 @@ export default function Login() {
         avatarUrl: profile.avatarUrl,
       });
       setUserProfile(profile);
-      connectSocket(token);
     } catch (err: any) {
       console.error('Email Login Error:', err);
       setError(getFirebaseAuthErrorMessage(err.code, err.message || 'Email hoặc mật khẩu không đúng.'));
@@ -176,9 +168,6 @@ export default function Login() {
           console.warn('Could not update display name:', e);
         }
       }
-
-      const token = await cred.user.getIdToken();
-      api.setToken(token);
 
       const profile: UserProfile = {
         uid: cred.user.uid,
@@ -202,7 +191,6 @@ export default function Login() {
         avatarUrl: profile.avatarUrl,
       });
       setUserProfile(profile);
-      connectSocket(token);
     } catch (err: any) {
       console.error('Email Register Error:', err);
       setError(getFirebaseAuthErrorMessage(err.code, err.message || 'Không thể tạo tài khoản. Vui lòng thử lại.'));

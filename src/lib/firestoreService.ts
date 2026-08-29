@@ -136,6 +136,7 @@ export async function createPhotoDoc(data: Omit<Photo, 'id'>): Promise<Photo> {
   const photo: Photo = {
     id: docRef.id,
     ...data,
+    visibility: data.visibility || 'private',
   };
   await setDoc(docRef, photo);
   return photo;
@@ -162,11 +163,20 @@ export async function getUserFeedOptimized(
     );
     const docs = await getDocs(q);
     return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
-  } catch {
-    const qFallback = query(collection(db, 'posts'), limit(pageSize));
-    const docs = await getDocs(qFallback);
-    const items = docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
-    return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (err) {
+    console.warn('getUserFeedOptimized query failed, falling back to public posts only:', err);
+    try {
+      const qPublic = query(
+        collection(db, 'posts'),
+        where('visibility', '==', 'public'),
+        limit(pageSize)
+      );
+      const docs = await getDocs(qPublic);
+      const items = docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Post);
+      return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -280,12 +290,16 @@ export async function getFriendsList(userId: string): Promise<UserProfile[]> {
     snap1.docs.forEach((d) => friendUids.add(d.data().addresseeId));
     snap2.docs.forEach((d) => friendUids.add(d.data().requesterId));
 
+    const uidList = Array.from(friendUids);
+    if (uidList.length === 0) return [];
+
     const profiles: UserProfile[] = [];
-    for (const uid of friendUids) {
-      const uDoc = await getDoc(doc(db, 'users', uid));
-      if (uDoc.exists()) {
-        profiles.push({ uid: uDoc.id, ...uDoc.data() } as UserProfile);
-      }
+    const CHUNK_SIZE = 30;
+    for (let i = 0; i < uidList.length; i += CHUNK_SIZE) {
+      const chunk = uidList.slice(i, i + CHUNK_SIZE);
+      const qUsers = query(collection(db, 'users'), where('uid', 'in', chunk));
+      const uSnap = await getDocs(qUsers);
+      uSnap.docs.forEach((u) => profiles.push({ uid: u.id, ...u.data() } as UserProfile));
     }
     return profiles;
   } catch (e) {
@@ -302,21 +316,26 @@ export async function getPendingFriendRequests(userId: string): Promise<Friendsh
       where('status', '==', 'pending')
     );
     const docs = await getDocs(q);
-    const friendships: Friendship[] = [];
+    if (docs.empty) return [];
 
-    for (const d of docs.docs) {
-      const data = d.data() as Friendship;
-      const requesterSnap = await getDoc(doc(db, 'users', data.requesterId));
-      friendships.push({
-        id: d.id,
-        ...data,
-        requesterProfile: requesterSnap.exists()
-          ? ({ uid: requesterSnap.id, ...requesterSnap.data() } as UserProfile)
-          : undefined,
-      });
+    const rawFriendships = docs.docs.map((d) => ({ id: d.id, ...d.data() }) as Friendship);
+    const requesterIds = Array.from(new Set(rawFriendships.map((f) => f.requesterId)));
+
+    const profileMap = new Map<string, UserProfile>();
+    const CHUNK_SIZE = 30;
+    for (let i = 0; i < requesterIds.length; i += CHUNK_SIZE) {
+      const chunk = requesterIds.slice(i, i + CHUNK_SIZE);
+      const qUsers = query(collection(db, 'users'), where('uid', 'in', chunk));
+      const uSnap = await getDocs(qUsers);
+      uSnap.docs.forEach((u) => profileMap.set(u.id, { uid: u.id, ...u.data() } as UserProfile));
     }
-    return friendships;
-  } catch {
+
+    return rawFriendships.map((f) => ({
+      ...f,
+      requesterProfile: profileMap.get(f.requesterId),
+    }));
+  } catch (e) {
+    console.error('getPendingFriendRequests error:', e);
     return [];
   }
 }
@@ -457,15 +476,14 @@ export async function getPublicFolders(limitCount: number = 30): Promise<Locatio
     const q = query(
       collection(db, 'folders'),
       where('visibility', '==', 'public'),
-      orderBy('createdAt', 'desc'),
       limit(limitCount)
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as LocationFolder);
-  } catch {
-    const qFallback = query(collection(db, 'folders'), limit(limitCount));
-    const snap = await getDocs(qFallback);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as LocationFolder);
+    const folders = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as LocationFolder);
+    return folders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (err) {
+    console.error('Failed to get public folders:', err);
+    return [];
   }
 }
 
@@ -473,14 +491,14 @@ export async function getPublicPhotos(limitCount: number = 50): Promise<Photo[]>
   try {
     const q = query(
       collection(db, 'photos'),
-      orderBy('uploadedAt', 'desc'),
+      where('visibility', '==', 'public'),
       limit(limitCount)
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Photo);
-  } catch {
-    const qFallback = query(collection(db, 'photos'), limit(limitCount));
-    const snap = await getDocs(qFallback);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Photo);
+    const photos = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Photo);
+    return photos.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  } catch (err) {
+    console.error('Failed to get public photos:', err);
+    return [];
   }
 }
