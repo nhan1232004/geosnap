@@ -62,6 +62,36 @@ service cloud.firestore {
       );
     }
 
+    // Helper: check if current user can read a folder by its visibility
+    function canReadFolder(folderId) {
+      let folder = get(/databases/$(database)/documents/folders/$(folderId));
+      return exists(folder.path) && (
+        folder.data.uid == request.auth.uid ||
+        folder.data.visibility == 'public' ||
+        (folder.data.visibility == 'friends' && isFriendshipAccepted(request.auth.uid, folder.data.uid))
+      );
+    }
+
+    // Helper: check if current user can read a post by its visibility
+    function canReadPost(postId) {
+      let post = get(/databases/$(database)/documents/posts/$(postId));
+      return exists(post.path) && (
+        post.data.uid == request.auth.uid ||
+        post.data.visibility == 'public' ||
+        (post.data.visibility == 'friends' && isFriendshipAccepted(request.auth.uid, post.data.uid))
+      );
+    }
+
+    // Helper: check if current user can read a page by its visibility
+    function canReadPage(pageId) {
+      let page = get(/databases/$(database)/documents/pages/$(pageId));
+      return exists(page.path) && (
+        page.data.createdBy == request.auth.uid ||
+        page.data.visibility == 'public' ||
+        (page.data.visibility == 'friends' && isFriendshipAccepted(request.auth.uid, page.data.createdBy))
+      );
+    }
+
     // ===============================================================
     // Validators
     // ===============================================================
@@ -131,8 +161,12 @@ service cloud.firestore {
     // Collection Rules
     // ===============================================================
 
+    // ---------------------------------------------------------------
+    // Users (Fix #1: Only owner, admin, or accepted friends can read)
+    // ---------------------------------------------------------------
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isOwner(userId) || isAdmin() ||
+                     (isAuthenticated() && isFriendshipAccepted(request.auth.uid, userId));
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
                      uidUnchanged() &&
                      ((request.resource.data.role == 'user') || isAdmin());
@@ -202,10 +236,18 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
-    // Comments
+    // Comments (Fix #3: Check parent folder/post visibility)
     // ---------------------------------------------------------------
     match /comments/{commentId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        // Comment author can always read their own comments
+        resource.data.uid == request.auth.uid ||
+        isAdmin() ||
+        // Comment on a folder — check folder visibility
+        ('folderId' in resource.data && canReadFolder(resource.data.folderId)) ||
+        // Comment on a post — check post visibility
+        ('postId' in resource.data && canReadPost(resource.data.postId))
+      );
       allow create: if isAuthenticated() &&
                      request.resource.data.uid == request.auth.uid &&
                      request.resource.data.content is string &&
@@ -218,7 +260,7 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
-    // Posts (B4: Safe update for reactions & counts)
+    // Posts (Fix #2: Require read access to update reactions/counts)
     // ---------------------------------------------------------------
     match /posts/{postId} {
       allow read: if isDocOwner() || isAdmin() ||
@@ -231,7 +273,12 @@ service cloud.firestore {
                      request.resource.data.imageUrls is list &&
                      request.resource.data.visibility in ['public', 'friends', 'private'] &&
                      request.resource.data.createdAt is string;
-      allow update: if isDocOwner() || (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'commentCount', 'shareCount']));
+      allow update: if isDocOwner() ||
+                     // Non-owners can only update reactions/counts AND must have read access
+                     (isAuthenticated() &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'commentCount', 'shareCount']) &&
+                      (resource.data.visibility == 'public' ||
+                       (resource.data.visibility == 'friends' && isFriendshipAccepted(request.auth.uid, resource.data.uid))));
       allow delete: if isDocOwner() || isAdmin();
     }
 
@@ -275,11 +322,15 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
-    // Pages (B1 & WS-05: Public Read & Scoped Creator)
+    // Pages (Fix: friends visibility now checks isFriendshipAccepted)
     // ---------------------------------------------------------------
     match /pages/{pageId} {
       allow read: if (resource.data.visibility == 'public') ||
-                     (isAuthenticated() && (resource.data.createdBy == request.auth.uid || resource.data.visibility in ['friends', 'public']));
+                     (isAuthenticated() && (
+                       resource.data.createdBy == request.auth.uid ||
+                       (resource.data.visibility == 'friends' &&
+                        isFriendshipAccepted(request.auth.uid, resource.data.createdBy))
+                     ));
       allow create: if isAuthenticated() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuthenticated() && (
         resource.data.createdBy == request.auth.uid ||
@@ -289,12 +340,14 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
-    // Blocks (B1 & WS-05: Public Read for Public Pages & Scoped Creator)
+    // Blocks (Fix #4: Read scoped to page visibility, not just auth)
     // ---------------------------------------------------------------
     match /blocks/{blockId} {
-      allow read: if isAuthenticated() ||
-                     (exists(/databases/$(database)/documents/pages/$(resource.data.pageId)) &&
-                      get(/databases/$(database)/documents/pages/$(resource.data.pageId)).data.visibility == 'public');
+      allow read: if (isAuthenticated() && canReadPage(resource.data.pageId)) ||
+                     // Unauthenticated users can read blocks of public pages
+                     (!isAuthenticated() &&
+                       exists(/databases/$(database)/documents/pages/$(resource.data.pageId)) &&
+                       get(/databases/$(database)/documents/pages/$(resource.data.pageId)).data.visibility == 'public');
       allow create: if isAuthenticated() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuthenticated() && (
         resource.data.createdBy == request.auth.uid ||
@@ -304,20 +357,27 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
-    // Assets (B1: Scoped to Uploader)
+    // Assets (Fix #5a: Read scoped to uploader or admin)
     // ---------------------------------------------------------------
     match /assets/{assetId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        resource.data.uploadedBy == request.auth.uid ||
+        isAdmin()
+      );
       allow create: if isAuthenticated() && request.resource.data.uploadedBy == request.auth.uid;
       allow update: if isAuthenticated() && resource.data.uploadedBy == request.auth.uid;
       allow delete: if isAuthenticated() && resource.data.uploadedBy == request.auth.uid;
     }
 
     // ---------------------------------------------------------------
-    // Share Grants (B1: Scoped to Granter)
+    // Share Grants (Fix #5b: Read scoped to granter or grantee)
     // ---------------------------------------------------------------
     match /shares/{shareId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        resource.data.grantedBy == request.auth.uid ||
+        resource.data.grantedTo == request.auth.uid ||
+        isAdmin()
+      );
       allow create: if isAuthenticated() && request.resource.data.grantedBy == request.auth.uid;
       allow update: if isAuthenticated() && resource.data.grantedBy == request.auth.uid;
       allow delete: if isAuthenticated() && resource.data.grantedBy == request.auth.uid;

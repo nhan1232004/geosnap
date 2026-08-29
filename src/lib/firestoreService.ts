@@ -8,6 +8,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   query,
   where,
   orderBy,
@@ -200,11 +201,12 @@ export async function togglePostReactionDoc(
   if (!snap.exists()) return;
   const currentReactions = snap.data().reactions || {};
   if (currentReactions[userId] === emoji) {
-    delete currentReactions[userId];
+    // Remove reaction — atomic per-field delete via dot-notation
+    await updateDoc(docRef, { [`reactions.${userId}`]: deleteField() });
   } else {
-    currentReactions[userId] = emoji;
+    // Set/change reaction — atomic per-field update via dot-notation
+    await updateDoc(docRef, { [`reactions.${userId}`]: emoji });
   }
-  await updateDoc(docRef, { reactions: currentReactions });
 }
 
 export async function deletePostDoc(postId: string): Promise<void> {
