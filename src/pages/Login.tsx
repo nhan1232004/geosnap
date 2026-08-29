@@ -28,7 +28,7 @@ function getFirebaseAuthErrorMessage(code: string, fallback: string): string {
     case 'auth/user-not-found':
     case 'auth/wrong-password':
     case 'auth/invalid-credential':
-      return 'Email hoặc mật khẩu không chính xác.';
+      return 'Email hoặc mật khẩu không chính xác. Nếu chưa tạo tài khoản, vui lòng chọn "Đăng ký mới" hoặc đăng nhập bằng nút "Tiếp tục với Google".';
     case 'auth/email-already-in-use':
       return 'Email này đã được đăng ký trước đó. Vui lòng chọn Đăng nhập.';
     case 'auth/weak-password':
