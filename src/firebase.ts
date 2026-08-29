@@ -5,6 +5,7 @@ import {
   browserLocalPersistence,
   browserSessionPersistence,
   inMemoryPersistence,
+  browserPopupRedirectResolver,
   GoogleAuthProvider,
   getAuth,
   Auth,
@@ -33,6 +34,7 @@ try {
       browserSessionPersistence,
       inMemoryPersistence,
     ],
+    popupRedirectResolver: browserPopupRedirectResolver,
   });
 } catch {
   authInstance = getAuth(app);

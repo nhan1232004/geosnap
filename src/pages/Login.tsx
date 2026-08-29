@@ -7,6 +7,7 @@ import {
   updateProfile,
   sendPasswordResetEmail,
   signInWithPopup,
+  browserPopupRedirectResolver,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase';
@@ -86,7 +87,7 @@ export default function Login() {
   const handleGoogle = async () => {
     setError(''); setLoading(true);
     try {
-      const cred = await signInWithPopup(auth, googleProvider);
+      const cred = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
 
       let profile: UserProfile;
       try {
