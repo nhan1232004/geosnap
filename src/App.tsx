@@ -26,6 +26,7 @@ const Messages = lazy(() => import('./pages/Messages'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const StoryViewer = lazy(() => import('./pages/StoryViewer'));
 const Explore = lazy(() => import('./pages/Explore'));
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage'));
 
 function LoadingFallback() {
   return (
@@ -39,6 +40,14 @@ import { OfflineBanner } from './components/OfflineBanner';
 import { UserProfile } from './types';
 
 const NAV_ITEMS = [
+  {
+    to: '/workspace', label: 'Workspace', icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+        <path d="M6 6h10"/><path d="M6 10h10"/>
+      </svg>
+    )
+  },
   {
     to: '/', label: 'Timeline', icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -111,7 +120,9 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isFullHeightPage = ['/messages', '/map'].includes(location.pathname);
+  const isFullHeightPage = ['/messages', '/map', '/workspace'].some((p) =>
+    location.pathname.startsWith(p)
+  );
 
   // Apply theme class to document
   useEffect(() => {
@@ -365,6 +376,9 @@ function AppContent() {
 
               <ErrorBoundary resetKeys={[location.pathname]} title="Lỗi tải trang">
                 <Routes>
+                  <Route path="/workspace" element={<WorkspacePage />} />
+                  <Route path="/workspace/:workspaceId" element={<WorkspacePage />} />
+                  <Route path="/workspace/:workspaceId/page/:pageId" element={<WorkspacePage />} />
                   <Route path="/" element={<Timeline />} />
                   <Route path="/map" element={<MapViewPage />} />
                   <Route path="/upload" element={<Upload />} />
