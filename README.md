@@ -4,6 +4,7 @@
 
 ### Ứng dụng Mạng Xã Hội Địa Điểm Bằng Hình Ảnh
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-geosnap--4dd7a.web.app-FF6B35?style=for-the-badge&logo=google-chrome&logoColor=white)](https://geosnap-4dd7a.web.app/map)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Firebase](https://img.shields.io/badge/Firebase-12-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/)
@@ -13,9 +14,19 @@
 
 **GeoSnap** là web app cho phép người dùng upload ảnh, tự động đọc tọa độ GPS từ metadata EXIF, gom nhóm ảnh theo địa điểm và chia sẻ hành trình với bạn bè.
 
-[Demo](#demo) • [Tính năng](#-tính-năng-chính) • [Cài đặt](#-cài-đặt--chạy-locally) • [Công nghệ](#-công-nghệ-sử-dụng) • [Kiến trúc](#-kiến-trúc-dự-án)
+🌐 **Trực tiếp trải nghiệm (Live Demo):** [https://geosnap-4dd7a.web.app/map](https://geosnap-4dd7a.web.app/map)
+
+[🌐 Live Demo](https://geosnap-4dd7a.web.app/map) • [Tính năng](#-tính-năng-chính) • [Cài đặt](#-cài-đặt--chạy-locally) • [Công nghệ](#-công-nghệ-sử-dụng) • [Kiến trúc](#-kiến-trúc-dự-án)
 
 </div>
+
+---
+
+## 🌐 Live Demo
+
+- **Web App**: [https://geosnap-4dd7a.web.app](https://geosnap-4dd7a.web.app)
+- **Bản đồ trực quan (Map View)**: [https://geosnap-4dd7a.web.app/map](https://geosnap-4dd7a.web.app/map)
+- **Workspace Ghi Chú**: [https://geosnap-4dd7a.web.app/workspace](https://geosnap-4dd7a.web.app/workspace)
 
 ---
 
