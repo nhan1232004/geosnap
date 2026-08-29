@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from './store/useAppStore';
 import { api } from './lib/api';
@@ -12,20 +12,28 @@ import { auth, db } from './firebase';
 import { Sun, Moon, Menu, X } from 'lucide-react';
 import { initializePushNotifications } from './services/notifications';
 
-import Login from './pages/Login';
-import AuthCallback from './pages/AuthCallback';
-import Timeline from './pages/Timeline';
-import Upload from './pages/Upload';
-import MapViewPage from './pages/Map';
-import FolderDetail from './pages/FolderDetail';
-import Friends from './pages/Friends';
-import InvitePage from './pages/Invite';
-import Feed from './pages/Feed';
-import Profile from './pages/Profile';
-import Messages from './pages/Messages';
-import Dashboard from './pages/Dashboard';
-import StoryViewer from './pages/StoryViewer';
-import Explore from './pages/Explore';
+const Login = lazy(() => import('./pages/Login'));
+const AuthCallback = lazy(() => import('./pages/AuthCallback'));
+const Timeline = lazy(() => import('./pages/Timeline'));
+const Upload = lazy(() => import('./pages/Upload'));
+const MapViewPage = lazy(() => import('./pages/Map'));
+const FolderDetail = lazy(() => import('./pages/FolderDetail'));
+const Friends = lazy(() => import('./pages/Friends'));
+const InvitePage = lazy(() => import('./pages/Invite'));
+const Feed = lazy(() => import('./pages/Feed'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Messages = lazy(() => import('./pages/Messages'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const StoryViewer = lazy(() => import('./pages/StoryViewer'));
+const Explore = lazy(() => import('./pages/Explore'));
+
+function LoadingFallback() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-bg-deep">
+      <div className="w-8 h-8 border-3 border-brand border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { OfflineBanner } from './components/OfflineBanner';
 import { UserProfile } from './types';
@@ -211,7 +219,8 @@ function AppContent() {
   const avatarInitial = displayName.charAt(0).toUpperCase();
 
   return (
-    <Routes>
+    <Suspense fallback={<LoadingFallback />}>
+      <Routes>
       {/* Public invite page - no sidebar */}
       <Route path="/invite/:code" element={<InvitePage />} />
       <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
@@ -403,7 +412,8 @@ function AppContent() {
           </div>
         )
       } />
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }
 

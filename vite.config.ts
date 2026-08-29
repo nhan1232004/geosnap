@@ -91,6 +91,7 @@ export default defineConfig(({mode}) => {
             'map-libs': ['leaflet', 'react-leaflet'],
             'motion': ['motion'],
             'ui-utils': ['lucide-react', 'clsx', 'tailwind-merge', 'date-fns'],
+            'firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage']
           }
         }
       }

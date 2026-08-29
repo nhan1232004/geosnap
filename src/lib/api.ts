@@ -187,7 +187,7 @@ class ApiClient {
   private async retryRequest<T>(originalResponse: Response): Promise<T> {
     const url = originalResponse.url;
     const response = await fetch(url, {
-      method: originalResponse.request?.method || 'GET',
+      method: 'GET',
       headers: this.getHeaders(),
     });
     return this.handleResponse<T>(response);

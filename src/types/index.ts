@@ -117,3 +117,31 @@ export interface FeedItem {
   data: Post | (LocationFolder & { userProfile?: UserProfile });
   createdAt: string;
 }
+
+// ========== Workspace Domain Types ==========
+export type {
+  Workspace,
+  Page,
+  Block,
+  BlockType,
+  Asset,
+  ShareGrant,
+  SharePermission,
+  PageTreeNode,
+} from './workspace';
+export { SCHEMA_VERSION } from './workspace';
+
+export type {
+  ParagraphData,
+  HeadingData,
+  TodoData,
+  ListItemData,
+  QuoteData,
+  CalloutData,
+  DividerData,
+  ImageData,
+  GalleryData,
+  MapData,
+  ChildPageData,
+  BlockDataMap,
+} from './blocks';
