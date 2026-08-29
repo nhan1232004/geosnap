@@ -178,13 +178,51 @@ export async function restorePage(id: string): Promise<void> {
   await updatePage(id, { archivedAt: null });
 }
 
-export async function deletePage(id: string): Promise<void> {
-  // Delete all blocks first
-  const blocks = await getPageBlocks(id);
+export async function deletePage(id: string, workspaceId?: string): Promise<void> {
+  const pagesToDelete = [id];
+  
+  if (workspaceId) {
+    try {
+      const tree = await getPageTree(workspaceId);
+      const findAndCollect = (nodes: PageTreeNode[]) => {
+        for (const node of nodes) {
+          if (node.page.id === id) {
+            const collect = (n: PageTreeNode) => {
+              pagesToDelete.push(n.page.id);
+              n.children.forEach(collect);
+            };
+            node.children.forEach(collect);
+            break;
+          }
+          if (node.children.length > 0) {
+            findAndCollect(node.children);
+          }
+        }
+      };
+      findAndCollect(tree);
+    } catch (e) {
+      console.warn('Failed to collect child pages for deletion:', e);
+    }
+  }
+
   const batch = writeBatch(db);
-  blocks.forEach((b) => batch.delete(doc(db, 'blocks', b.id)));
-  batch.delete(doc(db, 'pages', id));
+  for (const pId of pagesToDelete) {
+    const blocks = await getPageBlocks(pId);
+    blocks.forEach((b) => batch.delete(doc(db, 'blocks', b.id)));
+    batch.delete(doc(db, 'pages', pId));
+  }
   await batch.commit();
+}
+
+export function flattenPageTree(nodes: PageTreeNode[]): Page[] {
+  const result: Page[] = [];
+  for (const node of nodes) {
+    result.push(node.page);
+    if (node.children && node.children.length > 0) {
+      result.push(...flattenPageTree(node.children));
+    }
+  }
+  return result;
 }
 
 export async function movePage(id: string, newParentId: string | null): Promise<void> {

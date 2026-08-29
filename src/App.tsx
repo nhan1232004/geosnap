@@ -25,6 +25,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const StoryViewer = lazy(() => import('./pages/StoryViewer'));
 const Explore = lazy(() => import('./pages/Explore'));
 const WorkspacePage = lazy(() => import('./pages/WorkspacePage'));
+const PublicPage = lazy(() => import('./pages/PublicPage'));
 
 function LoadingFallback() {
   return (
@@ -222,7 +223,8 @@ function AppContent() {
   return (
     <Suspense fallback={<LoadingFallback />}>
       <Routes>
-      {/* Public invite page - no sidebar */}
+      {/* Public pages - no sidebar */}
+      <Route path="/p/:pageId" element={<PublicPage />} />
       <Route path="/invite/:code" element={<InvitePage />} />
       <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
       <Route path="/auth/callback" element={<AuthCallback />} />

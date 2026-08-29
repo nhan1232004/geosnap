@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { useEffect, useState, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useNavigate } from 'react-router-dom';
@@ -45,6 +45,23 @@ const customIcon = L.divIcon({
   popupAnchor: [0, -32],
 });
 
+function FitBoundsHandler({ locations }: { locations: MapLocation[] }) {
+  const map = useMapEvents({});
+  const fittedRef = useRef(false);
+
+  useEffect(() => {
+    if (locations.length > 0 && !fittedRef.current) {
+      fittedRef.current = true;
+      const bounds = L.latLngBounds(locations.map(l => [l.lat, l.lng]));
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+      }
+    }
+  }, [locations, map]);
+
+  return null;
+}
+
 export default function MapView({ workspaceId, pages }: MapViewProps) {
   const navigate = useNavigate();
   const [locations, setLocations] = useState<MapLocation[]>([]);
@@ -55,30 +72,36 @@ export default function MapView({ workspaceId, pages }: MapViewProps) {
 
     async function loadMapLocations() {
       setLoading(true);
-      const locs: MapLocation[] = [];
-
-      for (const page of pages) {
-        try {
-          const blocks = await getPageBlocks(page.id);
-          const mapBlock = blocks.find((b: Block) => b.type === 'map');
-          if (mapBlock && mapBlock.data) {
-            const data = mapBlock.data as { centerLat?: number; centerLng?: number };
-            if (typeof data.centerLat === 'number' && typeof data.centerLng === 'number') {
-              locs.push({
-                page,
-                lat: data.centerLat,
-                lng: data.centerLng,
-              });
+      try {
+        const results = await Promise.all(
+          pages.map(async (page) => {
+            try {
+              const blocks = await getPageBlocks(page.id);
+              const mapBlock = blocks.find((b: Block) => b.type === 'map');
+              if (mapBlock && mapBlock.data) {
+                const data = mapBlock.data as { centerLat?: number; centerLng?: number };
+                if (typeof data.centerLat === 'number' && typeof data.centerLng === 'number') {
+                  return {
+                    page,
+                    lat: data.centerLat,
+                    lng: data.centerLng,
+                  };
+                }
+              }
+            } catch (e) {
+              console.warn(`Could not load map blocks for page ${page.id}:`, e);
             }
-          }
-        } catch (e) {
-          console.warn(`Could not load map blocks for page ${page.id}:`, e);
-        }
-      }
+            return null;
+          })
+        );
 
-      if (isMounted) {
-        setLocations(locs);
-        setLoading(false);
+        if (isMounted) {
+          setLocations(results.filter((l): l is MapLocation => l !== null));
+        }
+      } catch (err) {
+        console.error('Failed to load map locations:', err);
+      } finally {
+        if (isMounted) setLoading(false);
       }
     }
 
@@ -91,7 +114,7 @@ export default function MapView({ workspaceId, pages }: MapViewProps) {
 
   const defaultCenter: [number, number] = locations.length > 0
     ? [locations[0].lat, locations[0].lng]
-    : [16.0544, 108.2022]; // Da Nang central Vietnam
+    : [16.0544, 108.2022];
 
   return (
     <div className="w-full h-[calc(100vh-220px)] min-h-[450px] rounded-2xl overflow-hidden border border-border-dim bg-surface relative flex flex-col">
@@ -130,6 +153,7 @@ export default function MapView({ workspaceId, pages }: MapViewProps) {
           className="w-full h-full z-0"
           scrollWheelZoom={true}
         >
+          <FitBoundsHandler locations={locations} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -143,22 +167,22 @@ export default function MapView({ workspaceId, pages }: MapViewProps) {
               position={[loc.lat, loc.lng]}
               icon={customIcon}
             >
-              <Popup className="custom-leaflet-popup">
-                <div className="p-2 min-w-[180px] max-w-[240px]">
+              <Popup className="custom-popup">
+                <div className="p-2 min-w-[180px] max-w-[240px] text-text-main">
                   {loc.page.cover && (
                     <img
                       src={loc.page.cover}
                       alt={loc.page.title}
-                      className="w-full h-24 object-cover rounded-lg mb-2"
+                      className="w-full h-24 object-cover rounded-lg mb-2 border border-border-dim"
                     />
                   )}
-                  <div className="flex items-center gap-1.5 font-bold text-sm text-gray-900 mb-1">
+                  <div className="flex items-center gap-1.5 font-bold text-sm text-text-heading mb-1">
                     <span>{loc.page.icon || '📍'}</span>
                     <span className="truncate">{loc.page.title}</span>
                   </div>
                   <button
                     onClick={() => navigate(`/workspace/${workspaceId}/page/${loc.page.id}`)}
-                    className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#ff6b35] text-white rounded-lg text-xs font-semibold hover:bg-[#e05320] transition-colors"
+                    className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-semibold hover:bg-brand/90 transition-colors shadow-md shadow-brand/20 cursor-pointer"
                   >
                     <span>Mở trang</span>
                     <ExternalLink className="w-3 h-3" />

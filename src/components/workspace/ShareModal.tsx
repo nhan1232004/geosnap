@@ -18,10 +18,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [copied, setCopied] = useState(false);
   const visibility = page?.visibility || 'private';
 
-  if (!isOpen || !page) return null;
+  const shareUrl = `${window.location.origin}/p/${page.id}`;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(`https://geosnap.app/p/${page.id}`);
+    navigator.clipboard.writeText(shareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -61,7 +61,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             {visibility === 'public' && (
               <div className="flex items-center mt-3 bg-gray-50 dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700">
                 <div className="flex-1 truncate text-sm text-gray-600 dark:text-gray-400 px-2">
-                  https://geosnap.app/p/{page.id}
+                  {shareUrl}
                 </div>
                 <button
                   onClick={handleCopy}

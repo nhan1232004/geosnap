@@ -32,8 +32,6 @@ export function HeadingBlock({ block, isEditing, onChange, onKeyDown }: Props) {
     } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault();
       onKeyDown?.(e);
-    } else {
-      onKeyDown?.(e);
     }
   };
 

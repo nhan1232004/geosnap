@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -15,18 +15,23 @@ interface MapFolder extends LocationFolder {
   userProfile?: UserProfile;
 }
 
-const createCustomIcon = (imageUrl?: string, isMine = true) => {
+const iconCache = new Map<string, L.DivIcon>();
+
+const getCustomIcon = (imageUrl?: string, isMine = true) => {
   const defaultImage = 'https://images.unsplash.com/photo-1524661135-423995f22d0b?w=200&h=200&fit=crop';
   const imgUrl = imageUrl || defaultImage;
+  const key = `${imgUrl}_${isMine ? '1' : '0'}`;
+  if (iconCache.has(key)) return iconCache.get(key)!;
+
   const ringColor = isMine ? 'ring-brand' : 'ring-blue-500';
   const dotBg = isMine ? 'bg-brand' : 'bg-blue-500';
 
-  return L.divIcon({
+  const icon = L.divIcon({
     className: 'custom-marker',
     html: `
       <div class="relative flex items-center justify-center w-12 h-12">
         <div class="absolute inset-0 bg-black/50 rounded-full blur-[4px]"></div>
-        <img src="${imgUrl}" class="w-10 h-10 object-cover rounded-full ring-2 ${ringColor} shadow-xl z-10" />
+        <img src="${imgUrl}" loading="lazy" class="w-10 h-10 object-cover rounded-full ring-2 ${ringColor} shadow-xl z-10" />
         <div class="absolute -bottom-1 z-20 ${dotBg} w-3 h-3 rounded-full border border-white"></div>
       </div>
     `,
@@ -34,10 +39,16 @@ const createCustomIcon = (imageUrl?: string, isMine = true) => {
     iconAnchor: [24, 48],
     popupAnchor: [0, -48]
   });
+
+  iconCache.set(key, icon);
+  return icon;
 };
 
-const createClusterIcon = (count: number) => {
-  return L.divIcon({
+const clusterIconCache = new Map<number, L.DivIcon>();
+
+const getClusterIcon = (count: number) => {
+  if (clusterIconCache.has(count)) return clusterIconCache.get(count)!;
+  const icon = L.divIcon({
     className: 'custom-cluster-marker',
     html: `
       <div class="relative flex items-center justify-center w-12 h-12">
@@ -52,6 +63,8 @@ const createClusterIcon = (count: number) => {
     iconAnchor: [24, 24],
     popupAnchor: [0, -20]
   });
+  clusterIconCache.set(count, icon);
+  return icon;
 };
 
 function MapEventsTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
@@ -60,6 +73,23 @@ function MapEventsTracker({ onZoomChange }: { onZoomChange: (zoom: number) => vo
       onZoomChange(map.getZoom());
     }
   });
+  return null;
+}
+
+function FitBoundsHandler({ folders }: { folders: MapFolder[] }) {
+  const map = useMapEvents({});
+  const fittedRef = useRef(false);
+
+  useEffect(() => {
+    if (folders.length > 0 && !fittedRef.current) {
+      fittedRef.current = true;
+      const bounds = L.latLngBounds(folders.map(f => [f.centerLat, f.centerLng]));
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+      }
+    }
+  }, [folders, map]);
+
   return null;
 }
 
@@ -97,24 +127,33 @@ export default function MapViewPage() {
     fetchMine();
   }, [fetchMine]);
 
-  // Fetch friend folders when toggled
+  // Fetch friend folders in parallel (MAP-01)
   const fetchFriendFolders = useCallback(async () => {
     if (!user) return;
     try {
       const friends = await getFriendsList(user.uid);
-      const allFriendFolders: MapFolder[] = [];
-      for (const friend of friends) {
-        const folders = await getUserFoldersOptimized(friend.uid, 100);
-        const publicOrFriends = folders.filter((f) => f.visibility !== 'private');
-        publicOrFriends.forEach((f) => {
-          allFriendFolders.push({
-            ...f,
-            isMine: false,
-            userProfile: friend,
-          });
-        });
+      if (friends.length === 0) {
+        setFriendFolders([]);
+        return;
       }
-      setFriendFolders(allFriendFolders);
+      
+      const results = await Promise.all(
+        friends.map(async (friend) => {
+          try {
+            const folders = await getUserFoldersOptimized(friend.uid, 50);
+            const publicOrFriends = folders.filter((f) => f.visibility !== 'private');
+            return publicOrFriends.map((f) => ({
+              ...f,
+              isMine: false,
+              userProfile: friend,
+            }));
+          } catch {
+            return [];
+          }
+        })
+      );
+      
+      setFriendFolders(results.flat());
     } catch (e) {
       console.error(e);
       toast('Không thể tải hành trình của bạn bè', 'error');
@@ -130,16 +169,20 @@ export default function MapViewPage() {
   const rawDisplayedFolders = showFriends ? [...myFolders, ...friendFolders] : myFolders;
 
   const displayedFolders = useMemo(() => {
-    const now = new Date();
+    const now = Date.now();
     return rawDisplayedFolders.filter(folder => {
       if (timeFilter === 'all') return true;
-      const createdDate = new Date(folder.createdAt);
-      const diffTime = Math.abs(now.getTime() - createdDate.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const dateStr = folder.lastVisitedAt || folder.createdAt;
+      const itemTime = new Date(dateStr).getTime();
+      if (isNaN(itemTime)) return true;
+
+      const diffMs = now - itemTime;
+      if (diffMs < 0) return true;
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
 
       if (timeFilter === 'week') return diffDays <= 7;
       if (timeFilter === 'month') return diffDays <= 30;
-      if (timeFilter === 'year') return createdDate.getFullYear() === now.getFullYear();
+      if (timeFilter === 'year') return new Date(itemTime).getFullYear() === new Date(now).getFullYear();
       return true;
     });
   }, [rawDisplayedFolders, timeFilter]);
@@ -285,6 +328,7 @@ export default function MapViewPage() {
         className="h-full w-full z-0 font-sans"
       >
         <MapEventsTracker onZoomChange={setZoom} />
+        <FitBoundsHandler folders={displayedFolders} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={
@@ -304,7 +348,7 @@ export default function MapViewPage() {
               <Marker
                 key={`cluster-${cluster.id}`}
                 position={[cluster.centerLat, cluster.centerLng]}
-                icon={createClusterIcon(cluster.folders.length)}
+                icon={getClusterIcon(cluster.folders.length)}
               >
                 <Popup className="custom-popup">
                   <div className="w-64 max-h-80 overflow-y-auto pr-1 text-text-main">
@@ -343,7 +387,7 @@ export default function MapViewPage() {
               <Marker 
                 key={`single-${folder.id}`} 
                 position={[folder.centerLat, folder.centerLng]}
-                icon={createCustomIcon(folder.isMine ? folder.coverPhotoUrl : (folder.userProfile?.avatarUrl || folder.coverPhotoUrl), folder.isMine)}
+                icon={getCustomIcon(folder.isMine ? folder.coverPhotoUrl : (folder.userProfile?.avatarUrl || folder.coverPhotoUrl), folder.isMine)}
               >
                 <Popup className="custom-popup">
                   <div className="w-52 bg-bg-surface text-text-main">

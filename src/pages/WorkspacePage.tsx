@@ -35,6 +35,7 @@ import {
   updateBlock,
   deleteBlock,
   reorderBlocks,
+  flattenPageTree,
 } from '../lib/workspaceService';
 import type { Page, Block, BlockType, PageTreeNode, Workspace } from '../types';
 
@@ -86,6 +87,10 @@ export default function WorkspacePage() {
   const [viewMode, setViewMode] = useState<ViewMode>('document');
   const [loading, setLoading] = useState(true);
 
+  // Debouncing refs
+  const pendingBlockUpdatesRef = useRef<Map<string, { timeout: any; data: any }>>(new Map());
+  const pendingTitleUpdateRef = useRef<{ timeout?: any; title?: string } | null>(null);
+
   // Modals & Pickers
   const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
   const [isCoverPickerOpen, setIsCoverPickerOpen] = useState(false);
@@ -119,10 +124,32 @@ export default function WorkspacePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // 1. Initialize or Load Workspace
+  // Flush pending updates helper
+  const flushPendingUpdates = useCallback(() => {
+    pendingBlockUpdatesRef.current.forEach(({ timeout, data }, blockId) => {
+      clearTimeout(timeout);
+      updateBlock(blockId, { data }).catch(console.error);
+    });
+    pendingBlockUpdatesRef.current.clear();
+
+    if (pendingTitleUpdateRef.current?.timeout && pendingTitleUpdateRef.current.title && currentPage) {
+      clearTimeout(pendingTitleUpdateRef.current.timeout);
+      updatePage(currentPage.id, { title: pendingTitleUpdateRef.current.title }).catch(console.error);
+      pendingTitleUpdateRef.current = null;
+    }
+  }, [currentPage]);
+
+  useEffect(() => {
+    return () => {
+      flushPendingUpdates();
+    };
+  }, [flushPendingUpdates]);
+
+  // 1. Initialize Workspace (Decoupled from page navigation)
   useEffect(() => {
     if (!user) return;
 
+    let isMounted = true;
     async function initWorkspace() {
       try {
         setLoading(true);
@@ -139,6 +166,7 @@ export default function WorkspacePage() {
           currentWs = userWsList[0];
         }
 
+        if (!isMounted) return;
         setWorkspaces(userWsList);
         setWorkspace(currentWs);
         setActiveWorkspace(currentWs.id);
@@ -160,6 +188,8 @@ export default function WorkspacePage() {
           await createBlock(starterPage.id, 'paragraph', { text: 'Gõ phím / để thêm ảnh, bản đồ, trích dẫn hoặc bấm Trợ lý AI ở thanh công cụ phía trên.' });
           tree = await getPageTree(currentWs.id);
         }
+
+        if (!isMounted) return;
         setPageTree(tree);
 
         // Auto-select first page if none is in URL
@@ -169,16 +199,18 @@ export default function WorkspacePage() {
       } catch (err) {
         console.error('Failed to initialize workspace:', err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
     initWorkspace();
-  }, [user, paramWsId, paramPageId, navigate, setActiveWorkspace, setPageTree]);
+    return () => { isMounted = false; };
+  }, [user, paramWsId]);
 
   // 2. Load Page and its Blocks
   const refreshPageData = useCallback(async (pageId: string) => {
     try {
+      flushPendingUpdates();
       const page = await getPage(pageId);
       if (!page) {
         setCurrentPage(null);
@@ -197,11 +229,30 @@ export default function WorkspacePage() {
       }
       setBlocks(pageBlocks);
 
-      // Load Child Pages for this page
+      // Load Tree and Build Ancestors (WS-08)
       const wsId = page.workspaceId || workspace?.id;
       if (wsId) {
         const tree = await getPageTree(wsId);
         setPageTree(tree);
+
+        // Build ancestors
+        const path: Page[] = [];
+        const findAncestors = (nodes: PageTreeNode[], targetId: string, currentPath: Page[]): boolean => {
+          for (const node of nodes) {
+            if (node.page.id === targetId) {
+              path.push(...currentPath);
+              return true;
+            }
+            if (node.children && node.children.length > 0) {
+              if (findAncestors(node.children, targetId, [...currentPath, node.page])) {
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+        findAncestors(tree, pageId, []);
+        setAncestors(path);
 
         const findNode = (nodes: PageTreeNode[]): PageTreeNode | null => {
           for (const node of nodes) {
@@ -218,7 +269,7 @@ export default function WorkspacePage() {
     } catch (err) {
       console.error('Failed to load page:', err);
     }
-  }, [workspace, setActivePage, addToRecent, setPageTree]);
+  }, [workspace?.id, setActivePage, addToRecent, setPageTree, flushPendingUpdates]);
 
   useEffect(() => {
     if (paramPageId) {
@@ -226,22 +277,35 @@ export default function WorkspacePage() {
     } else {
       setCurrentPage(null);
       setActivePage(null);
+      setAncestors([]);
+      setChildPages([]);
     }
   }, [paramPageId, refreshPageData, setActivePage]);
 
-  // Handle Page Title Change
-  const handleTitleChange = async (newTitle: string) => {
+  // Handle Page Title Change with Debounce (WS-03)
+  const handleTitleChange = (newTitle: string) => {
     if (!currentPage) return;
     setCurrentPage((prev) => (prev ? { ...prev, title: newTitle } : null));
-    try {
-      await updatePage(currentPage.id, { title: newTitle });
-      if (workspace) {
-        const tree = await getPageTree(workspace.id);
-        setPageTree(tree);
-      }
-    } catch (e) {
-      console.error('Failed to update title:', e);
+
+    // Update in-memory tree immediately
+    const updateTitleInTree = (nodes: PageTreeNode[]): PageTreeNode[] => {
+      return nodes.map((node) => ({
+        ...node,
+        page: node.page.id === currentPage.id ? { ...node.page, title: newTitle } : node.page,
+        children: updateTitleInTree(node.children),
+      }));
+    };
+    setPageTree(updateTitleInTree(pageTree));
+
+    // Debounce Firestore update
+    if (pendingTitleUpdateRef.current?.timeout) {
+      clearTimeout(pendingTitleUpdateRef.current.timeout);
     }
+    const timeout = setTimeout(() => {
+      updatePage(currentPage.id, { title: newTitle }).catch(console.error);
+      pendingTitleUpdateRef.current = null;
+    }, 600);
+    pendingTitleUpdateRef.current = { timeout, title: newTitle };
   };
 
   // Handle Create Page
@@ -249,7 +313,6 @@ export default function WorkspacePage() {
     if (!workspace) return;
     try {
       const newPage = await createPage(workspace.id, parentId, 'Trang mới');
-      // Create initial paragraph block
       await createBlock(newPage.id, 'paragraph', { text: '' });
       const tree = await getPageTree(workspace.id);
       setPageTree(tree);
@@ -259,11 +322,11 @@ export default function WorkspacePage() {
     }
   };
 
-  // Handle Delete Page
+  // Handle Delete Page with Recursive child deletion (WS-10)
   const handleDeletePage = async (pageId: string) => {
     if (!workspace || !window.confirm('Bạn có chắc muốn xóa trang này cùng tất cả nội dung bên trong?')) return;
     try {
-      await deletePage(pageId);
+      await deletePage(pageId, workspace.id);
       const tree = await getPageTree(workspace.id);
       setPageTree(tree);
       if (currentPage?.id === pageId) {
@@ -274,10 +337,11 @@ export default function WorkspacePage() {
     }
   };
 
-  // Handle Add Block via Slash Menu
+  // Handle Add Block via Slash Menu & In-Place Insert (WS-02, WS-07)
   const handleSelectBlockType = async (type: BlockType, extraData?: any) => {
     if (!currentPage) return;
-    setSlashMenuState((prev) => ({ ...prev, isOpen: false }));
+    const afterBlockId = slashMenuState.afterBlockId;
+    setSlashMenuState((prev) => ({ ...prev, isOpen: false, afterBlockId: undefined }));
 
     const defaultDataMap: Record<BlockType, any> = {
       paragraph: { text: '' },
@@ -296,14 +360,33 @@ export default function WorkspacePage() {
       child_page: { childPageId: '' },
     };
 
+    let targetData = extraData || defaultDataMap[type];
+
     try {
+      // WS-07: Create real child page for child_page block
+      if (type === 'child_page' && !targetData.childPageId && workspace) {
+        const newChild = await createPage(workspace.id, currentPage.id, 'Trang con mới', { icon: '📄' });
+        await createBlock(newChild.id, 'paragraph', { text: '' });
+        targetData = { childPageId: newChild.id, title: 'Trang con mới', icon: '📄' };
+        getPageTree(workspace.id).then(setPageTree);
+      }
+
       const newBlock = await createBlock(
         currentPage.id,
         type,
-        extraData || defaultDataMap[type],
-        slashMenuState.afterBlockId
+        targetData,
+        afterBlockId
       );
-      setBlocks((prev) => [...prev, newBlock]);
+
+      // WS-02: Insert in-place right after afterBlockId
+      setBlocks((prev) => {
+        if (!afterBlockId) return [...prev, newBlock];
+        const index = prev.findIndex((b) => b.id === afterBlockId);
+        if (index === -1) return [...prev, newBlock];
+        const next = [...prev];
+        next.splice(index + 1, 0, newBlock);
+        return next;
+      });
     } catch (e) {
       console.error('Failed to create block:', e);
     }
@@ -339,16 +422,23 @@ export default function WorkspacePage() {
     }
   };
 
-  // Handle Block Update
-  const handleUpdateBlock = async (blockId: string, updatedData: any) => {
+  // Handle Block Update with Debounce (WS-03)
+  const handleUpdateBlock = (blockId: string, updatedData: any) => {
+    // 1. Update UI state immediately
     setBlocks((prev) =>
       prev.map((b) => (b.id === blockId ? { ...b, data: updatedData } : b))
     );
-    try {
-      await updateBlock(blockId, { data: updatedData });
-    } catch (e) {
-      console.error('Failed to update block:', e);
+
+    // 2. Debounce Firestore write (600ms)
+    const existing = pendingBlockUpdatesRef.current.get(blockId);
+    if (existing) {
+      clearTimeout(existing.timeout);
     }
+    const timeout = setTimeout(() => {
+      pendingBlockUpdatesRef.current.delete(blockId);
+      updateBlock(blockId, { data: updatedData }).catch(console.error);
+    }, 600);
+    pendingBlockUpdatesRef.current.set(blockId, { timeout, data: updatedData });
   };
 
   // Handle Block Delete
@@ -361,18 +451,16 @@ export default function WorkspacePage() {
     }
   };
 
-  // Handle Block Move Up / Down
+  // Handle Block Move Up / Down with Atomic Batch Reorder (WS-09)
   const handleMoveBlock = async (fromIndex: number, toIndex: number) => {
-    if (toIndex < 0 || toIndex >= blocks.length) return;
+    if (!currentPage || toIndex < 0 || toIndex >= blocks.length) return;
     const newBlocks = [...blocks];
     const [moved] = newBlocks.splice(fromIndex, 1);
     newBlocks.splice(toIndex, 0, moved);
     setBlocks(newBlocks);
 
     try {
-      for (let i = 0; i < newBlocks.length; i++) {
-        await updateBlock(newBlocks[i].id, { order: (i + 1) * 1000 });
-      }
+      await reorderBlocks(currentPage.id, newBlocks.map((b) => b.id));
     } catch (e) {
       console.error('Failed to reorder blocks:', e);
     }
@@ -565,7 +653,7 @@ export default function WorkspacePage() {
           <div className="p-6 sm:p-10 max-w-6xl mx-auto w-full">
             <GalleryView
               workspaceId={workspace?.id || ''}
-              pages={currentPage ? childPages : pageTree.map((n) => n.page)}
+              pages={currentPage ? childPages : flattenPageTree(pageTree)}
               onCreatePage={() => handleCreatePage(currentPage?.id || null)}
             />
           </div>
@@ -575,7 +663,7 @@ export default function WorkspacePage() {
           <div className="p-4 sm:p-8 max-w-6xl mx-auto w-full">
             <MapView
               workspaceId={workspace?.id || ''}
-              pages={currentPage ? [currentPage, ...childPages] : pageTree.map((n) => n.page)}
+              pages={currentPage ? [currentPage, ...childPages] : flattenPageTree(pageTree)}
             />
           </div>
         )}
@@ -584,7 +672,7 @@ export default function WorkspacePage() {
           <div className="p-6 sm:p-10 max-w-5xl mx-auto w-full">
             <TimelineView
               workspaceId={workspace?.id || ''}
-              pages={currentPage ? childPages : pageTree.map((n) => n.page)}
+              pages={currentPage ? childPages : flattenPageTree(pageTree)}
               onCreatePage={() => handleCreatePage(currentPage?.id || null)}
             />
           </div>
@@ -851,7 +939,7 @@ export default function WorkspacePage() {
       {isCommandPaletteOpen && (
         <CommandPalette
           isOpen={isCommandPaletteOpen}
-          pages={pageTree.map((n) => n.page)}
+          pages={flattenPageTree(pageTree)}
           onSelectPage={(id) => {
             navigate(`/workspace/${workspace?.id}/page/${id}`);
             setIsCommandPaletteOpen(false);
