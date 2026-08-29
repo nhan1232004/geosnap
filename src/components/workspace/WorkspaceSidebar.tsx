@@ -11,6 +11,7 @@ interface WorkspaceSidebarProps {
   onSelectWorkspace: (id: string) => void;
   onSelectPage: (id: string) => void;
   onCreatePage: (parentId: string | null) => void;
+  onDeletePage?: (pageId: string) => void;
   onOpenCommandPalette: () => void;
   onOpenMigration: () => void;
 }
@@ -23,6 +24,7 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   onSelectWorkspace,
   onSelectPage,
   onCreatePage,
+  onDeletePage,
   onOpenCommandPalette,
   onOpenMigration,
 }) => {
@@ -110,7 +112,7 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
             activePageId={activePageId}
             onSelectPage={onSelectPage}
             onCreateSubPage={(parentId) => onCreatePage(parentId)}
-            onDeletePage={() => {}}
+            onDeletePage={onDeletePage || (() => {})}
             onToggleFavorite={() => {}}
           />
         </div>

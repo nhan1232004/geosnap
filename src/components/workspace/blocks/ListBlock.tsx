@@ -11,24 +11,25 @@ interface Props {
 
 export function ListBlock({ block, isEditing, indexInList = 0, onChange, onKeyDown }: Props) {
   const data = (block.data || {}) as unknown as ListItemData;
-  const contentRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const text = data.text ?? '';
 
   useEffect(() => {
-    if (isEditing && contentRef.current) {
-      contentRef.current.focus();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [isEditing]);
+  }, [text]);
 
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const newText = e.currentTarget.textContent || '';
-    onChange({ text: newText });
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange({ text: e.target.value });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Backspace' && (contentRef.current?.textContent || '') === '') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onKeyDown?.(e);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault();
       onKeyDown?.(e);
     } else {
@@ -38,19 +39,19 @@ export function ListBlock({ block, isEditing, indexInList = 0, onChange, onKeyDo
 
   return (
     <div className="flex items-start gap-2 py-1">
-      <div className="mt-0.5 min-w-[1.5rem] text-text-dim select-none font-medium text-right pr-2">
+      <div className="mt-0.5 min-w-[1.25rem] text-brand select-none font-bold text-center">
         {block.type === 'bulleted_list' ? '•' : `${indexInList + 1}.`}
       </div>
-      <div
-        ref={contentRef}
-        contentEditable={isEditing}
-        suppressContentEditableWarning
-        onInput={handleInput}
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        readOnly={!isEditing}
+        value={text}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
-        className="flex-1 outline-none min-h-[1.5rem] text-text-main empty:before:content-['Danh_sách'] empty:before:text-text-dim"
-      >
-        {data.text || ''}
-      </div>
+        placeholder="Danh sách..."
+        className="flex-1 bg-transparent resize-none overflow-hidden outline-none border-none p-0 text-sm sm:text-base leading-relaxed text-text-main placeholder:text-text-dim/40 focus:ring-0"
+      />
     </div>
   );
 }

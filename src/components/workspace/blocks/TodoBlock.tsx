@@ -11,24 +11,26 @@ interface Props {
 
 export function TodoBlock({ block, isEditing, onChange, onKeyDown }: Props) {
   const data = (block.data || {}) as unknown as TodoData;
-  const contentRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const text = data.text ?? '';
+  const checked = !!data.checked;
 
   useEffect(() => {
-    if (isEditing && contentRef.current) {
-      contentRef.current.focus();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [isEditing]);
+  }, [text]);
 
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const newText = e.currentTarget.textContent || '';
-    onChange({ text: newText, checked: data.checked });
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange({ text: e.target.value, checked });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Backspace' && (contentRef.current?.textContent || '') === '') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onKeyDown?.(e);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault();
       onKeyDown?.(e);
     } else {
@@ -37,27 +39,34 @@ export function TodoBlock({ block, isEditing, onChange, onKeyDown }: Props) {
   };
 
   const toggleCheck = () => {
-    onChange({ text: data.text || '', checked: !data.checked });
+    onChange({ text, checked: !checked });
   };
 
   return (
-    <div className="flex items-start gap-2 py-1">
+    <div className="flex items-start gap-2.5 py-1">
       <button 
+        type="button"
         onClick={toggleCheck}
-        className="mt-1 text-text-dim hover:text-brand transition-colors"
+        className="mt-1 text-text-dim hover:text-brand transition-colors cursor-pointer shrink-0"
       >
-        {data.checked ? <CheckSquare size={18} className="text-brand" /> : <Square size={18} />}
+        {checked ? (
+          <CheckSquare size={18} className="text-brand fill-brand/10" />
+        ) : (
+          <Square size={18} className="hover:text-brand" />
+        )}
       </button>
-      <div
-        ref={contentRef}
-        contentEditable={isEditing}
-        suppressContentEditableWarning
-        onInput={handleInput}
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        readOnly={!isEditing}
+        value={text}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
-        className={`flex-1 outline-none min-h-[1.5rem] ${data.checked ? 'line-through text-text-dim' : 'text-text-main'} empty:before:content-['Việc_cần_làm'] empty:before:text-text-dim`}
-      >
-        {data.text || ''}
-      </div>
+        placeholder="Việc cần làm..."
+        className={`flex-1 bg-transparent resize-none overflow-hidden outline-none border-none p-0 text-sm sm:text-base leading-relaxed ${
+          checked ? 'line-through text-text-dim/60' : 'text-text-main'
+        } placeholder:text-text-dim/40 focus:ring-0`}
+      />
     </div>
   );
 }

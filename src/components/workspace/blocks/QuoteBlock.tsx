@@ -10,24 +10,25 @@ interface Props {
 
 export function QuoteBlock({ block, isEditing, onChange, onKeyDown }: Props) {
   const data = (block.data || {}) as unknown as QuoteData;
-  const contentRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const text = data.text ?? '';
 
   useEffect(() => {
-    if (isEditing && contentRef.current) {
-      contentRef.current.focus();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [isEditing]);
+  }, [text]);
 
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const newText = e.currentTarget.textContent || '';
-    onChange({ text: newText });
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange({ text: e.target.value });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Backspace' && (contentRef.current?.textContent || '') === '') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onKeyDown?.(e);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault();
       onKeyDown?.(e);
     } else {
@@ -36,17 +37,17 @@ export function QuoteBlock({ block, isEditing, onChange, onKeyDown }: Props) {
   };
 
   return (
-    <div className="py-2">
-      <div
-        ref={contentRef}
-        contentEditable={isEditing}
-        suppressContentEditableWarning
-        onInput={handleInput}
+    <div className="py-2 pl-4 border-l-4 border-brand/80 bg-brand/5 rounded-r-xl">
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        readOnly={!isEditing}
+        value={text}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
-        className="border-l-4 border-brand/80 pl-4 py-1 italic text-text-main/90 outline-none min-h-[1.5rem] empty:before:content-['Trích_dẫn'] empty:before:text-text-dim"
-      >
-        {data.text || ''}
-      </div>
+        placeholder="Trích dẫn cảm xúc..."
+        className="w-full bg-transparent resize-none overflow-hidden outline-none border-none p-0 italic text-sm sm:text-base leading-relaxed text-text-main placeholder:text-text-dim/40 focus:ring-0"
+      />
     </div>
   );
 }

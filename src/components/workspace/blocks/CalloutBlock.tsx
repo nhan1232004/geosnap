@@ -10,24 +10,25 @@ interface Props {
 
 export function CalloutBlock({ block, isEditing, onChange, onKeyDown }: Props) {
   const data = (block.data || {}) as unknown as CalloutData;
-  const contentRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const text = data.text ?? '';
 
   useEffect(() => {
-    if (isEditing && contentRef.current) {
-      contentRef.current.focus();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [isEditing]);
+  }, [text]);
 
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const newText = e.currentTarget.textContent || '';
-    onChange({ text: newText, icon: data.icon });
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange({ text: e.target.value, icon: data.icon });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Backspace' && (contentRef.current?.textContent || '') === '') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onKeyDown?.(e);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault();
       onKeyDown?.(e);
     } else {
@@ -37,18 +38,18 @@ export function CalloutBlock({ block, isEditing, onChange, onKeyDown }: Props) {
 
   return (
     <div className="py-2">
-      <div className="bg-surface/80 border border-border-dim p-3.5 flex items-start gap-3 rounded-xl">
-        <div className="text-xl leading-none mt-0.5">{data.icon || '💡'}</div>
-        <div
-          ref={contentRef}
-          contentEditable={isEditing}
-          suppressContentEditableWarning
-          onInput={handleInput}
+      <div className="bg-surface/80 border border-border-dim p-3.5 flex items-start gap-3 rounded-2xl shadow-xs">
+        <div className="text-xl leading-none mt-0.5 select-none">{data.icon || '💡'}</div>
+        <textarea
+          ref={textareaRef}
+          rows={1}
+          readOnly={!isEditing}
+          value={text}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
-          className="flex-1 outline-none min-h-[1.5rem] text-text-main empty:before:content-['Ghi_chú'] empty:before:text-text-dim"
-        >
-          {data.text || ''}
-        </div>
+          placeholder="Ghi chú nổi bật..."
+          className="flex-1 bg-transparent resize-none overflow-hidden outline-none border-none p-0 text-sm sm:text-base leading-relaxed text-text-main placeholder:text-text-dim/40 focus:ring-0"
+        />
       </div>
     </div>
   );

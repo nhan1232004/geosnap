@@ -273,8 +273,13 @@ export default function Upload() {
     
     setProgress(prev => ({ ...prev, [file.name]: 10 }));
     let lat = 0, lng = 0, takenAt = new Date().toISOString(), hasGps = false;
+    
+    // Fast EXIF parsing with 500ms timeout
     try {
-      const exifData = await exifr.parse(file, { gps: true, tiff: false, exif: true });
+      const exifPromise = exifr.parse(file, { gps: true, tiff: false, exif: true });
+      const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 500));
+      const exifData = await Promise.race([exifPromise, timeoutPromise]) as any;
+
       if (exifData && exifData.latitude && exifData.longitude) {
         lat = exifData.latitude;
         lng = exifData.longitude;
@@ -287,24 +292,23 @@ export default function Upload() {
       console.warn("EXIF read error", error);
     }
 
-    setProgress(prev => ({ ...prev, [file.name]: 40 }));
+    setProgress(prev => ({ ...prev, [file.name]: 35 }));
     
-    const blob = await resizeImageToBlob(file, 1200, 1200);
-    setProgress(prev => ({ ...prev, [file.name]: 60 }));
-    
-    const url = await uploadToStorage(user.uid, file, blob);
-    
-    setProgress(prev => ({ ...prev, [file.name]: 75 }));
-
-    if (!hasGps) {
-      setManualQueue(prev => [...prev, { file, url, name: file.name, takenAt }]);
-      setProgress(prev => ({ ...prev, [file.name]: -1 }));
-      return;
-    }
-
-    let matchingFolder = findMatchingFolder(lat, lng, folders);
-
     try {
+      const blob = await resizeImageToBlob(file, 1400, 1400);
+      setProgress(prev => ({ ...prev, [file.name]: 65 }));
+      
+      const url = await uploadToStorage(user.uid, file, blob);
+      setProgress(prev => ({ ...prev, [file.name]: 85 }));
+
+      if (!hasGps) {
+        setManualQueue(prev => [...prev, { file, url, name: file.name, takenAt }]);
+        setProgress(prev => ({ ...prev, [file.name]: -1 }));
+        return;
+      }
+
+      let matchingFolder = findMatchingFolder(lat, lng, folders);
+
       if (matchingFolder) {
         const newCount = matchingFolder.photoCount + 1;
         const newLat = ((matchingFolder.centerLat * matchingFolder.photoCount) + lat) / newCount;
@@ -354,6 +358,19 @@ export default function Upload() {
     }
   };
 
+  const handleBatchAssignAll = async (folderId: string) => {
+    if (!user || manualQueue.length === 0) return;
+    const folder = folders.find(f => f.id === folderId);
+    if (!folder) return;
+
+    toast(`Đang gán ${manualQueue.length} ảnh vào ${folder.name}...`, 'info');
+    const itemsToAssign = [...manualQueue];
+    for (const item of itemsToAssign) {
+      await handleAssign(item, folderId);
+    }
+    toast(`Đã gán toàn bộ ảnh vào ${folder.name}`, 'success');
+  };
+
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
     setUploading(true);
@@ -366,7 +383,12 @@ export default function Upload() {
     setProgress(initialProgress);
 
     try {
-      await Promise.all(acceptedFiles.map(processFile));
+      // Chunk into batches of 3 for smooth parallel processing without memory spikes
+      const CHUNK_SIZE = 3;
+      for (let i = 0; i < acceptedFiles.length; i += CHUNK_SIZE) {
+        const chunk = acceptedFiles.slice(i, i + CHUNK_SIZE);
+        await Promise.all(chunk.map(processFile));
+      }
       setStatusText('Tải lên hoàn tất!');
       toast(`Tải lên thành công ${acceptedFiles.length} ảnh`, 'success');
     } catch (e) {
@@ -389,72 +411,107 @@ export default function Upload() {
   } as any);
 
   return (
-    <div className="mx-auto max-w-2xl p-4 sm:p-10 pt-6 sm:pt-20">
-      <h1 className="mb-6 sm:mb-8 text-2xl sm:text-3xl font-bold tracking-tight text-text-heading">Upload Photos</h1>
+    <div className="mx-auto max-w-2xl p-4 sm:p-10 pt-6 sm:pt-12">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-text-heading">Tải ảnh lên (Upload)</h1>
+        <p className="text-text-dim text-xs sm:text-sm mt-1">Tự động nén nhanh, đọc tọa độ GPS và gom nhóm vào album</p>
+      </div>
       
       <div 
         {...getRootProps()} 
-        className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-[20px] border-2 border-dashed p-6 sm:p-16 text-center transition-all duration-300
+        className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed p-8 sm:p-16 text-center transition-all duration-300
         ${isDragActive ? 'border-brand bg-brand/5' : 'border-border-dim hover:border-brand/50 hover:bg-glass'}
-        ${uploading ? 'pointer-events-none opacity-50' : ''}`}
+        ${uploading ? 'pointer-events-none opacity-60' : ''}`}
       >
         <input {...getInputProps()} />
-        <UploadCloud className={`mb-6 h-16 w-16 transition-colors duration-300 ${isDragActive ? 'text-brand' : 'text-text-dim group-hover:text-brand/80'}`} />
-        <p className="text-[16px] font-medium text-text-main mb-2">{statusText}</p>
-        <p className="text-[13px] text-text-dim">Supports JPG, PNG, WEBP, HEIC with EXIF GPS</p>
+        <UploadCloud className={`mb-4 h-14 w-14 transition-colors duration-300 ${isDragActive ? 'text-brand' : 'text-text-dim group-hover:text-brand'}`} />
+        <p className="text-base font-semibold text-text-heading mb-1">{statusText}</p>
+        <p className="text-xs text-text-dim">Kéo thả hoặc nhấn để chọn ảnh (JPG, PNG, WEBP, HEIC)</p>
       </div>
 
       {manualQueue.length > 0 && (
-        <div className="mt-8 space-y-6">
-          <h3 className="font-semibold text-sm tracking-widest uppercase text-brand border-b border-border-dim pb-3 flex items-center">
-            <AlertCircle className="w-5 h-5 mr-2" />
-            Action Required: Missing GPS Data
-          </h3>
-          <div className="grid grid-cols-1 gap-4">
-            {manualQueue.map(item => (
-              <div key={item.name} className="flex flex-col md:flex-row gap-6 p-4 rounded-xl border border-brand/30 bg-bg-card backdrop-blur-md shadow-lg shadow-brand/5">
-                <img src={item.url} className="w-32 h-24 object-cover rounded-lg" alt={item.name} />
-                <div className="flex-1 flex flex-col justify-center py-2">
-                  <h4 className="font-medium text-text-heading mb-1 line-clamp-1">{item.name}</h4>
-                  <p className="text-[13px] text-text-dim mb-4">No location data found in image EXIF. Update date/time and assign a location.</p>
-                  
-                  <div className="mb-4">
-                    <label className="block text-[11px] font-semibold text-text-dim uppercase tracking-wider mb-2">Date & Time Taken</label>
-                    <input
-                      type="datetime-local"
-                      value={formatForInput(item.takenAt)}
-                      onChange={(e) => handleDateChange(item.name, e.target.value)}
-                      className="w-full bg-surface border border-border-dim rounded-lg px-3 py-2 text-sm text-text-main focus:outline-none focus:border-brand/50 transition-colors"
-                    />
-                  </div>
+        <div className="mt-8 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border-dim pb-3">
+            <h3 className="font-bold text-xs tracking-wider uppercase text-brand flex items-center gap-1.5">
+              <AlertCircle className="w-4 h-4" />
+              <span>Cần gắn vị trí ({manualQueue.length} ảnh chưa có GPS)</span>
+            </h3>
 
-                  <label className="block text-[11px] font-semibold text-text-dim uppercase tracking-wider mb-2">Location Assignment</label>
-                  <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+            {folders.length > 0 && (
+              <div className="flex items-center gap-2">
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) handleBatchAssignAll(e.target.value);
+                  }}
+                  defaultValue=""
+                  className="bg-surface border border-border-dim rounded-xl px-2.5 py-1 text-xs text-text-main focus:outline-none focus:border-brand"
+                >
+                  <option value="" disabled>Gán tất cả vào album...</option>
+                  {folders.map(f => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {manualQueue.map(item => (
+              <div key={item.name} className="flex flex-col sm:flex-row gap-4 p-3.5 rounded-2xl border border-brand/20 bg-bg-card backdrop-blur-md shadow-sm">
+                <img src={item.url} className="w-24 h-24 sm:w-28 sm:h-28 object-cover rounded-xl shrink-0" alt={item.name} />
+                <div className="flex-1 min-w-0 flex flex-col justify-between">
+                  <div>
+                    <h4 className="font-semibold text-text-heading text-xs truncate mb-1">{item.name}</h4>
+                    <p className="text-[11px] text-text-dim">Ảnh chưa có tọa độ GPS. Hãy chọn album hoặc vị trí trên bản đồ.</p>
+                  </div>
+                  
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <select 
-                      className="flex-1 bg-surface border border-border-dim rounded-lg px-3 py-2 text-sm text-text-main focus:outline-none focus:border-brand/50 transition-colors"
+                      className="flex-1 min-w-[140px] bg-surface border border-border-dim rounded-lg px-2.5 py-1.5 text-xs text-text-main focus:outline-none focus:border-brand"
                       onChange={(e) => {
                         if (e.target.value) handleAssign(item, e.target.value);
                       }}
-                      value=""
+                      defaultValue=""
                     >
-                      <option value="" disabled>Select an existing folder...</option>
+                      <option value="" disabled>Chọn album có sẵn...</option>
                       {folders.map(f => (
                         <option key={f.id} value={f.id}>{f.name}</option>
                       ))}
                     </select>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => setPickingItem(item)}
-                        className="px-3 py-2 rounded-lg text-sm font-medium text-brand hover:text-white hover:bg-brand/20 border border-brand/30 transition-colors flex items-center justify-center whitespace-nowrap flex-1 sm:flex-none"
-                        title="Pick on map to create new or assign"
-                      >
-                        <MapPin className="w-4 h-4 mr-2" />
-                        <span>Map / New Location</span>
-                      </button>
-                      <button onClick={() => handleSkip(item)} className="px-4 py-2 rounded-lg text-sm font-medium text-text-dim hover:text-white hover:bg-glass border border-border-dim transition-colors">
-                        Skip
-                      </button>
-                    </div>
+
+                    <button 
+                      type="button"
+                      onClick={() => setPickingItem(item)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-brand hover:text-white hover:bg-brand bg-brand/10 border border-brand/30 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>Chọn trên bản đồ</span>
+                    </button>
+
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        if (navigator.geolocation) {
+                          navigator.geolocation.getCurrentPosition(async (pos) => {
+                            setPickedPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                            setPickingItem(item);
+                          });
+                        }
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-text-main hover:bg-surface border border-border-dim transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Sử dụng GPS hiện tại"
+                    >
+                      <Navigation className="w-3.5 h-3.5 text-brand" />
+                      <span>GPS hiện tại</span>
+                    </button>
+
+                    <button 
+                      type="button"
+                      onClick={() => handleSkip(item)} 
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-text-dim hover:text-text-main transition-colors cursor-pointer"
+                    >
+                      Bỏ qua
+                    </button>
                   </div>
                 </div>
               </div>

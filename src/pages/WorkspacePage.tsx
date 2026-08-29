@@ -143,6 +143,11 @@ export default function WorkspacePage() {
         // Load Page Tree
         const tree = await getPageTree(currentWs.id);
         setPageTree(tree);
+
+        // Auto-select first page if none is in URL
+        if (!paramPageId && tree.length > 0) {
+          navigate(`/workspace/${currentWs.id}/page/${tree[0].page.id}`, { replace: true });
+        }
       } catch (err) {
         console.error('Failed to initialize workspace:', err);
       } finally {
@@ -151,7 +156,7 @@ export default function WorkspacePage() {
     }
 
     initWorkspace();
-  }, [user, paramWsId, setActiveWorkspace, setPageTree]);
+  }, [user, paramWsId, paramPageId, navigate, setActiveWorkspace, setPageTree]);
 
   // 2. Load Page and its Blocks
   const refreshPageData = useCallback(async (pageId: string) => {
@@ -303,6 +308,23 @@ export default function WorkspacePage() {
     }
   };
 
+  // Handle Block Move Up / Down
+  const handleMoveBlock = async (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= blocks.length) return;
+    const newBlocks = [...blocks];
+    const [moved] = newBlocks.splice(fromIndex, 1);
+    newBlocks.splice(toIndex, 0, moved);
+    setBlocks(newBlocks);
+
+    try {
+      for (let i = 0; i < newBlocks.length; i++) {
+        await updateBlock(newBlocks[i].id, { order: (i + 1) * 1000 });
+      }
+    } catch (e) {
+      console.error('Failed to reorder blocks:', e);
+    }
+  };
+
   const isFavorite = currentPage ? favoritePageIds.includes(currentPage.id) : false;
 
   if (loading && !workspace) {
@@ -328,6 +350,7 @@ export default function WorkspacePage() {
           onSelectWorkspace={(id) => navigate(`/workspace/${id}`)}
           onSelectPage={(id) => navigate(`/workspace/${workspace?.id}/page/${id}`)}
           onCreatePage={(parentId) => handleCreatePage(parentId)}
+          onDeletePage={(pageId) => handleDeletePage(pageId)}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onOpenMigration={() => setIsMigrationModalOpen(true)}
         />
@@ -610,6 +633,8 @@ export default function WorkspacePage() {
                         indexInList={index + 1}
                         onUpdate={(updatedData) => handleUpdateBlock(block.id, updatedData)}
                         onDelete={() => handleDeleteBlock(block.id)}
+                        onMoveUp={() => handleMoveBlock(index, index - 1)}
+                        onMoveDown={() => handleMoveBlock(index, index + 1)}
                         onInsertBelow={() => {
                           setSlashMenuState({
                             isOpen: true,

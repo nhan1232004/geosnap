@@ -10,24 +10,26 @@ interface Props {
 
 export function HeadingBlock({ block, isEditing, onChange, onKeyDown }: Props) {
   const data = (block.data || { level: 1 }) as unknown as HeadingData;
-  const contentRef = useRef<HTMLHeadingElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const text = data.text ?? '';
+  const level = data.level || 1;
 
   useEffect(() => {
-    if (isEditing && contentRef.current) {
-      contentRef.current.focus();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [isEditing]);
+  }, [text]);
 
-  const handleInput = (e: React.FormEvent<HTMLHeadingElement>) => {
-    const newText = e.currentTarget.textContent || '';
-    onChange({ text: newText, level: data.level || 1 });
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange({ text: e.target.value, level });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLHeadingElement>) => {
-    if (e.key === 'Backspace' && (contentRef.current?.textContent || '') === '') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter') {
       e.preventDefault();
       onKeyDown?.(e);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault();
       onKeyDown?.(e);
     } else {
@@ -35,42 +37,25 @@ export function HeadingBlock({ block, isEditing, onChange, onKeyDown }: Props) {
     }
   };
 
-  const commonClasses = "outline-none empty:before:content-['Tiêu_đề'] empty:before:text-text-dim text-text-heading";
-  
-  if (data.level === 1) {
-    return (
-      <h1
-        ref={contentRef}
-        contentEditable={isEditing}
-        suppressContentEditableWarning
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        className={`text-2xl font-bold py-2 ${commonClasses}`}
-      >{data.text || ''}</h1>
-    );
-  }
-  
-  if (data.level === 2) {
-    return (
-      <h2
-        ref={contentRef}
-        contentEditable={isEditing}
-        suppressContentEditableWarning
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        className={`text-xl font-bold py-1.5 ${commonClasses}`}
-      >{data.text || ''}</h2>
-    );
-  }
-  
+  const levelStyles = 
+    level === 1
+      ? 'text-2xl sm:text-3xl font-extrabold text-text-heading py-2'
+      : level === 2
+      ? 'text-xl sm:text-2xl font-bold text-text-heading py-1.5'
+      : 'text-lg sm:text-xl font-semibold text-text-heading py-1';
+
   return (
-    <h3
-      ref={contentRef}
-      contentEditable={isEditing}
-      suppressContentEditableWarning
-      onInput={handleInput}
-      onKeyDown={handleKeyDown}
-      className={`text-lg font-semibold py-1 ${commonClasses}`}
-    >{data.text || ''}</h3>
+    <div className="py-1">
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        readOnly={!isEditing}
+        value={text}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        placeholder={`Tiêu đề ${level === 1 ? 'lớn (H1)' : level === 2 ? 'vừa (H2)' : 'nhỏ (H3)'}...`}
+        className={`w-full bg-transparent resize-none overflow-hidden outline-none border-none p-0 ${levelStyles} placeholder:text-text-dim/40 focus:ring-0`}
+      />
+    </div>
   );
 }

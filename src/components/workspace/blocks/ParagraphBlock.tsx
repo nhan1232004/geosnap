@@ -11,36 +11,29 @@ interface Props {
 
 export function ParagraphBlock({ block, isEditing, onChange, onKeyDown, onOpenSlashMenu }: Props) {
   const data = (block.data || {}) as unknown as ParagraphData;
-  const contentRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const text = data.text ?? '';
 
   useEffect(() => {
-    if (isEditing && contentRef.current) {
-      contentRef.current.focus();
-      const range = document.createRange();
-      const sel = window.getSelection();
-      if (sel) {
-        range.selectNodeContents(contentRef.current);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  }, [isEditing]);
+  }, [text]);
 
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const newText = e.currentTarget.textContent || '';
-    onChange({ text: newText });
-    
-    if (newText === '/' && onOpenSlashMenu && contentRef.current) {
-      onOpenSlashMenu(contentRef.current.getBoundingClientRect());
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    onChange({ text: val });
+    if (val === '/' && onOpenSlashMenu && textareaRef.current) {
+      onOpenSlashMenu(textareaRef.current.getBoundingClientRect());
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Backspace' && (contentRef.current?.textContent || '') === '') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onKeyDown?.(e);
-    } else if (e.key === 'Enter' && !e.shiftKey) {
+    } else if (e.key === 'Backspace' && text === '') {
       e.preventDefault();
       onKeyDown?.(e);
     } else {
@@ -50,17 +43,16 @@ export function ParagraphBlock({ block, isEditing, onChange, onKeyDown, onOpenSl
 
   return (
     <div className="py-1">
-      <div
-        ref={contentRef}
-        contentEditable={isEditing}
-        suppressContentEditableWarning
-        onInput={handleInput}
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        readOnly={!isEditing}
+        value={text}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
-        className="outline-none min-h-[1.5rem] text-text-main empty:before:content-[attr(data-placeholder)] empty:before:text-text-dim"
-        data-placeholder="Nhập nội dung hoặc gõ '/' để chọn lệnh..."
-      >
-        {data.text || ''}
-      </div>
+        placeholder="Nhập nội dung hoặc gõ '/' để chọn lệnh..."
+        className="w-full bg-transparent resize-none overflow-hidden outline-none border-none p-0 text-sm sm:text-base leading-relaxed text-text-main placeholder:text-text-dim/50 focus:ring-0"
+      />
     </div>
   );
 }
