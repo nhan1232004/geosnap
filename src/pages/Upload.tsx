@@ -580,11 +580,13 @@ export default function Upload() {
               <MapContainer 
                 center={folders.length > 0 ? [folders[0].centerLat, folders[0].centerLng] : [10.8231, 106.6297]} 
                 zoom={10} 
-                className="h-full w-full z-0 dark-tiles"
+                className="h-full w-full z-0"
               >
                  <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                  url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                  subdomains="abcd"
+                  maxZoom={20}
                  />
                  <LocationMarker position={pickedPos} setPosition={setPickedPos} />
               </MapContainer>
