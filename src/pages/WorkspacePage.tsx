@@ -126,22 +126,40 @@ export default function WorkspacePage() {
     async function initWorkspace() {
       try {
         setLoading(true);
-        const userWsList = await getUserWorkspaces(user!.uid);
-        setWorkspaces(userWsList);
-
+        let userWsList = await getUserWorkspaces(user!.uid);
         let currentWs: Workspace;
-        if (paramWsId) {
+
+        if (userWsList.length === 0) {
+          currentWs = await getOrCreateDefaultWorkspace(user!.uid);
+          userWsList = [currentWs];
+        } else if (paramWsId) {
           const found = userWsList.find((w) => w.id === paramWsId);
-          currentWs = found || (await getOrCreateDefaultWorkspace(user!.uid));
+          currentWs = found || userWsList[0];
         } else {
-          currentWs = userWsList[0] || (await getOrCreateDefaultWorkspace(user!.uid));
+          currentWs = userWsList[0];
         }
 
+        setWorkspaces(userWsList);
         setWorkspace(currentWs);
         setActiveWorkspace(currentWs.id);
 
         // Load Page Tree
-        const tree = await getPageTree(currentWs.id);
+        let tree = await getPageTree(currentWs.id);
+        if (tree.length === 0) {
+          const starterPage = await createPage(currentWs.id, null, 'Hành trình đầu tiên 🌟', {
+            icon: '✈️',
+            visibility: 'private',
+          });
+          await createBlock(starterPage.id, 'heading_1', { text: 'Chào mừng bạn đến với GeoSnap Workspace!' });
+          await createBlock(starterPage.id, 'callout', { 
+            text: 'Đây là không gian ghi chú, lập kế hoạch và lưu giữ ký ức du lịch theo phong cách Notion.',
+            icon: '💡'
+          });
+          await createBlock(starterPage.id, 'todo', { text: 'Chuẩn bị hành lý và máy ảnh', checked: true });
+          await createBlock(starterPage.id, 'todo', { text: 'Ghé thăm các địa điểm yêu thích', checked: false });
+          await createBlock(starterPage.id, 'paragraph', { text: 'Gõ phím / để thêm ảnh, bản đồ, trích dẫn hoặc bấm Trợ lý AI ở thanh công cụ phía trên.' });
+          tree = await getPageTree(currentWs.id);
+        }
         setPageTree(tree);
 
         // Auto-select first page if none is in URL
@@ -172,12 +190,17 @@ export default function WorkspacePage() {
       addToRecent(page);
 
       // Load Blocks
-      const pageBlocks = await getPageBlocks(page.id);
+      let pageBlocks = await getPageBlocks(page.id);
+      if (pageBlocks.length === 0) {
+        const defaultBlock = await createBlock(page.id, 'paragraph', { text: '' });
+        pageBlocks = [defaultBlock];
+      }
       setBlocks(pageBlocks);
 
       // Load Child Pages for this page
-      if (workspace) {
-        const tree = await getPageTree(workspace.id);
+      const wsId = page.workspaceId || workspace?.id;
+      if (wsId) {
+        const tree = await getPageTree(wsId);
         setPageTree(tree);
 
         const findNode = (nodes: PageTreeNode[]): PageTreeNode | null => {
@@ -283,6 +306,36 @@ export default function WorkspacePage() {
       setBlocks((prev) => [...prev, newBlock]);
     } catch (e) {
       console.error('Failed to create block:', e);
+    }
+  };
+
+  // Handle Transform Block Type
+  const handleTransformBlock = async (blockId: string, newType: BlockType, extraData?: any) => {
+    const defaultDataMap: Record<BlockType, any> = {
+      paragraph: { text: '' },
+      heading_1: { text: '', level: 1 },
+      heading_2: { text: '', level: 2 },
+      heading_3: { text: '', level: 3 },
+      todo: { text: '', checked: false },
+      bulleted_list: { text: '' },
+      numbered_list: { text: '' },
+      quote: { text: '' },
+      callout: { text: '', icon: '💡' },
+      divider: {},
+      image: { assetId: '', url: extraData?.url || 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800', caption: '' },
+      gallery: { assetIds: [], layout: 'grid', columns: 3 },
+      map: { centerLat: 16.0544, centerLng: 108.2022, zoom: 12 },
+      child_page: { childPageId: '' },
+    };
+
+    const targetData = extraData || defaultDataMap[newType];
+    setBlocks((prev) =>
+      prev.map((b) => (b.id === blockId ? { ...b, type: newType, data: targetData } : b))
+    );
+    try {
+      await updateBlock(blockId, { type: newType, data: targetData });
+    } catch (e) {
+      console.error('Failed to transform block:', e);
     }
   };
 
@@ -635,6 +688,7 @@ export default function WorkspacePage() {
                         onDelete={() => handleDeleteBlock(block.id)}
                         onMoveUp={() => handleMoveBlock(index, index - 1)}
                         onMoveDown={() => handleMoveBlock(index, index + 1)}
+                        onTransformType={(type, extraData) => handleTransformBlock(block.id, type, extraData)}
                         onInsertBelow={() => {
                           setSlashMenuState({
                             isOpen: true,

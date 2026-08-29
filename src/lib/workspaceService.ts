@@ -46,18 +46,63 @@ export async function getWorkspace(id: string): Promise<Workspace | null> {
 }
 
 export async function getUserWorkspaces(userId: string): Promise<Workspace[]> {
-  const q = query(
-    collection(db, 'workspaces'),
-    where('members', 'array-contains', userId)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Workspace);
+  try {
+    const q = query(
+      collection(db, 'workspaces'),
+      where('members', 'array-contains', userId)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Workspace);
+    }
+    
+    // Fallback: Check ownerId
+    const q2 = query(collection(db, 'workspaces'), where('ownerId', '==', userId));
+    const snap2 = await getDocs(q2);
+    return snap2.docs.map((d) => ({ id: d.id, ...d.data() }) as Workspace);
+  } catch (err) {
+    console.error('Failed to get user workspaces:', err);
+    return [];
+  }
 }
 
 export async function getOrCreateDefaultWorkspace(userId: string): Promise<Workspace> {
   const workspaces = await getUserWorkspaces(userId);
-  if (workspaces.length > 0) return workspaces[0];
-  return createWorkspace('Không gian của tôi');
+  if (workspaces.length > 0) {
+    const ws = workspaces[0];
+    // Check if workspace has pages, if not create starter page
+    const existingPages = await getPageTree(ws.id);
+    if (existingPages.length === 0) {
+      await createStarterPage(ws.id);
+    }
+    return ws;
+  }
+
+  const newWs = await createWorkspace('Không gian của tôi');
+  await createStarterPage(newWs.id);
+  return newWs;
+}
+
+async function createStarterPage(workspaceId: string): Promise<Page> {
+  const page = await createPage(workspaceId, null, 'Hành trình đầu tiên 🌟', {
+    icon: '✈️',
+    visibility: 'private',
+  });
+  
+  try {
+    await createBlock(page.id, 'heading_1', { text: 'Chào mừng bạn đến với GeoSnap Workspace!' });
+    await createBlock(page.id, 'callout', { 
+      text: 'Đây là không gian ghi chú, lập kế hoạch và lưu giữ ký ức du lịch theo phong cách Notion.',
+      icon: '💡'
+    });
+    await createBlock(page.id, 'todo', { text: 'Chuẩn bị hành lý và máy ảnh', checked: true });
+    await createBlock(page.id, 'todo', { text: 'Ghé thăm các địa điểm yêu thích', checked: false });
+    await createBlock(page.id, 'paragraph', { text: 'Gõ phím / để thêm ảnh, bản đồ, trích dẫn hoặc bấm Trợ lý AI ở thanh công cụ phía trên.' });
+  } catch (e) {
+    console.warn('Could not populate starter blocks:', e);
+  }
+
+  return page;
 }
 
 // ============================================================
@@ -76,29 +121,16 @@ export async function createPage(
   const ref = doc(collection(db, 'pages'));
   const now = new Date().toISOString();
 
-  // Get max sortKey for siblings
-  const siblingsQuery = parentPageId
-    ? query(
-        collection(db, 'pages'),
-        where('workspaceId', '==', workspaceId),
-        where('parentPageId', '==', parentPageId),
-        orderBy('sortKey', 'desc')
-      )
-    : query(
-        collection(db, 'pages'),
-        where('workspaceId', '==', workspaceId),
-        where('parentPageId', '==', null),
-        orderBy('sortKey', 'desc')
-      );
-
   let maxSortKey = 0;
   try {
+    const siblingsQuery = query(
+      collection(db, 'pages'),
+      where('workspaceId', '==', workspaceId)
+    );
     const siblings = await getDocs(siblingsQuery);
-    if (!siblings.empty) {
-      maxSortKey = (siblings.docs[0].data().sortKey || 0) + 1;
-    }
+    maxSortKey = siblings.size;
   } catch {
-    // Index may not exist yet, default to 0
+    // Default to 0
   }
 
   const page: Page = {
@@ -160,41 +192,56 @@ export async function movePage(id: string, newParentId: string | null): Promise<
 }
 
 export async function getPageTree(workspaceId: string): Promise<PageTreeNode[]> {
-  const q = query(
-    collection(db, 'pages'),
-    where('workspaceId', '==', workspaceId),
-    where('archivedAt', '==', null),
-    orderBy('sortKey', 'asc')
-  );
-  const snap = await getDocs(q);
-  const pages = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Page);
+  try {
+    const q = query(
+      collection(db, 'pages'),
+      where('workspaceId', '==', workspaceId)
+    );
+    const snap = await getDocs(q);
+    const allPages = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as Page)
+      .filter((p) => !p.archivedAt);
 
-  // Build tree
-  const map = new Map<string, PageTreeNode>();
-  const roots: PageTreeNode[] = [];
+    allPages.sort((a, b) => (a.sortKey || 0) - (b.sortKey || 0));
 
-  pages.forEach((p) => map.set(p.id, { page: p, children: [] }));
-  pages.forEach((p) => {
-    const node = map.get(p.id)!;
-    if (p.parentPageId && map.has(p.parentPageId)) {
-      map.get(p.parentPageId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  });
+    // Build tree
+    const map = new Map<string, PageTreeNode>();
+    const roots: PageTreeNode[] = [];
 
-  return roots;
+    allPages.forEach((p) => map.set(p.id, { page: p, children: [] }));
+    allPages.forEach((p) => {
+      const node = map.get(p.id)!;
+      if (p.parentPageId && map.has(p.parentPageId)) {
+        map.get(p.parentPageId)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    });
+
+    return roots;
+  } catch (err) {
+    console.error('Failed to get page tree:', err);
+    return [];
+  }
 }
 
 export async function getChildPages(workspaceId: string, parentPageId: string | null): Promise<Page[]> {
-  const q = query(
-    collection(db, 'pages'),
-    where('workspaceId', '==', workspaceId),
-    where('parentPageId', '==', parentPageId),
-    orderBy('sortKey', 'asc')
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Page);
+  try {
+    const q = query(
+      collection(db, 'pages'),
+      where('workspaceId', '==', workspaceId)
+    );
+    const snap = await getDocs(q);
+    const pages = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as Page)
+      .filter((p) => (p.parentPageId || null) === parentPageId && !p.archivedAt);
+
+    pages.sort((a, b) => (a.sortKey || 0) - (b.sortKey || 0));
+    return pages;
+  } catch (err) {
+    console.error('Failed to get child pages:', err);
+    return [];
+  }
 }
 
 // ============================================================
@@ -213,7 +260,6 @@ export async function createBlock(
   const ref = doc(collection(db, 'blocks'));
   const now = new Date().toISOString();
 
-  // Calculate order
   let order = 0;
   if (afterBlockId) {
     const afterBlock = await getDoc(doc(db, 'blocks', afterBlockId));
@@ -221,19 +267,12 @@ export async function createBlock(
       order = (afterBlock.data().order || 0) + 1;
     }
   } else {
-    // Get max order in page
-    const q = query(
-      collection(db, 'blocks'),
-      where('pageId', '==', pageId),
-      orderBy('order', 'desc')
-    );
     try {
+      const q = query(collection(db, 'blocks'), where('pageId', '==', pageId));
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        order = (snap.docs[0].data().order || 0) + 1;
-      }
+      order = (snap.size + 1) * 1000;
     } catch {
-      // Index may not exist yet
+      order = Date.now();
     }
   }
 
@@ -256,13 +295,19 @@ export async function createBlock(
 }
 
 export async function getPageBlocks(pageId: string): Promise<Block[]> {
-  const q = query(
-    collection(db, 'blocks'),
-    where('pageId', '==', pageId),
-    orderBy('order', 'asc')
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Block);
+  try {
+    const q = query(
+      collection(db, 'blocks'),
+      where('pageId', '==', pageId)
+    );
+    const snap = await getDocs(q);
+    const blocks = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Block);
+    blocks.sort((a, b) => (a.order || 0) - (b.order || 0));
+    return blocks;
+  } catch (err) {
+    console.error('Failed to get page blocks:', err);
+    return [];
+  }
 }
 
 export async function updateBlock(id: string, data: Partial<Block>): Promise<void> {
@@ -282,7 +327,7 @@ export async function deleteBlock(id: string): Promise<void> {
 export async function reorderBlocks(pageId: string, blockIds: string[]): Promise<void> {
   const batch = writeBatch(db);
   blockIds.forEach((id, index) => {
-    batch.update(doc(db, 'blocks', id), { order: index });
+    batch.update(doc(db, 'blocks', id), { order: (index + 1) * 1000 });
   });
   await batch.commit();
 }

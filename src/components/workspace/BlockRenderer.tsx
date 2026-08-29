@@ -24,6 +24,7 @@ interface Props {
   onInsertBelow: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  onTransformType?: (type: BlockType, extraData?: any) => void;
 }
 
 export function BlockRenderer({
@@ -35,7 +36,8 @@ export function BlockRenderer({
   onDelete,
   onInsertBelow,
   onMoveUp,
-  onMoveDown
+  onMoveDown,
+  onTransformType,
 }: Props) {
   const [isHovered, setIsHovered] = useState(false);
   const [slashMenuState, setSlashMenuState] = useState<{
@@ -60,9 +62,13 @@ export function BlockRenderer({
     setSlashMenuState({ isOpen: true, rect, search: '' });
   };
 
-  const handleSelectSlashMenu = (type: BlockType) => {
+  const handleSelectSlashMenu = (type: BlockType, extraData?: any) => {
     setSlashMenuState(prev => ({ ...prev, isOpen: false }));
-    console.log("Transformed to", type);
+    if (onTransformType) {
+      onTransformType(type, extraData);
+    } else {
+      onInsertBelow();
+    }
   };
 
   const renderBlock = () => {
