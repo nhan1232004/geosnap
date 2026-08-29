@@ -365,20 +365,34 @@ export default function Login() {
               {/* Email options */}
               <div className="flex gap-3">
                 <button
-                  onClick={() => setMode('email-login')}
+                  onClick={() => { setMode('email-login'); setError(''); }}
                   className="flex-1 py-3 rounded-2xl border border-white/15 text-white/70 text-[14px] font-medium hover:bg-white/10 hover:border-white/25 hover:text-white transition-all"
                 >
-                  Đăng nhập
+                  Đăng nhập Email
                 </button>
                 <button
-                  onClick={() => setMode('email-register')}
+                  onClick={() => { setMode('email-register'); setError(''); }}
                   className="flex-1 py-3 rounded-2xl border border-brand/40 bg-brand/10 text-brand text-[14px] font-medium hover:bg-brand/20 transition-all"
                 >
                   Đăng ký mới
                 </button>
               </div>
 
-              {error && <p className="text-red-400 text-[13px] text-center">{error}</p>}
+              <div className="flex justify-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setMode('forgot-password'); setError(''); }}
+                  className="text-white/40 hover:text-brand text-[13px] underline underline-offset-4 transition-colors"
+                >
+                  Quên mật khẩu?
+                </button>
+              </div>
+
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/25 rounded-2xl p-3.5 space-y-2">
+                  <p className="text-red-400 text-[13px] text-center">{error}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -408,12 +422,35 @@ export default function Login() {
                 </div>
               </div>
 
-              <button type="button" onClick={() => { setMode('forgot-password'); setError(''); }}
-                className="text-brand/70 hover:text-brand text-[13px] transition-colors">
-                Quên mật khẩu?
-              </button>
+              <div className="flex justify-between items-center text-[13px]">
+                <span className="text-white/30">Quên thông tin đăng nhập?</span>
+                <button type="button" onClick={() => { setMode('forgot-password'); setError(''); }}
+                  className="text-brand hover:underline font-medium transition-colors">
+                  Quên mật khẩu?
+                </button>
+              </div>
 
-              {error && <p className="text-red-400 text-[13px]">{error}</p>}
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/25 rounded-2xl p-3.5 space-y-2.5">
+                  <p className="text-red-400 text-[13px]">{error}</p>
+                  <div className="flex gap-2 pt-1 border-t border-red-500/20">
+                    <button
+                      type="button"
+                      onClick={() => { setMode('forgot-password'); setError(''); }}
+                      className="flex-1 py-1.5 px-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[12px] font-medium transition-colors text-center"
+                    >
+                      🔑 Lấy lại mật khẩu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setMode('email-register'); setError(''); }}
+                      className="flex-1 py-1.5 px-2.5 rounded-lg bg-brand/20 hover:bg-brand/30 text-brand text-[12px] font-medium transition-colors text-center"
+                    >
+                      ✨ Tạo tài khoản mới
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <button type="submit" disabled={loading}
                 className="w-full py-3.5 rounded-2xl bg-brand text-white font-semibold text-[15px] hover:bg-brand-light transition-all disabled:opacity-50 active:scale-[0.98] mt-1">
