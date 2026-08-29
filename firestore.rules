@@ -43,13 +43,6 @@ service cloud.firestore {
       );
     }
 
-    // Check if two users are friends (bidirectional)
-    function areFriends(uid1, uid2) {
-      return (
-        exists(/databases/$(database)/documents/friendships/$(uid1 + '_' + uid2)) ||
-        exists(/databases/$(database)/documents/friendships/$(uid2 + '_' + uid1))
-      );
-    }
 
     // Check if friendship exists and is accepted
     function isFriendshipAccepted(uid1, uid2) {
