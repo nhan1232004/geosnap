@@ -113,6 +113,15 @@ body {
   padding: 16px;
 }
 
+/* Custom Clean Dark Map Tiles for OpenStreetMap (No watermark, 100% free, no API key needed) */
+.dark-tiles .leaflet-tile {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
+.dark .leaflet-container:not(.light-map) .leaflet-tile {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
 /* Lightbox overlay */
 .lightbox-overlay {
   position: fixed;

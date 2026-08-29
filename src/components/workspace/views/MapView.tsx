@@ -127,12 +127,12 @@ export default function MapView({ workspaceId, pages }: MapViewProps) {
         <MapContainer
           center={defaultCenter}
           zoom={locations.length > 0 ? 11 : 6}
-          className="w-full h-full z-0"
+          className="w-full h-full z-0 dark-tiles"
           scrollWheelZoom={true}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
           {locations.map((loc) => (
