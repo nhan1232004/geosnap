@@ -2,12 +2,18 @@ import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import exifr from 'exifr';
 import { UploadCloud, CheckCircle2, Image as ImageIcon, AlertCircle, MapPin, Navigation } from 'lucide-react';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { useToast } from '../components/ToastContainer';
 import { findMatchingFolder } from '../lib/clustering';
 import { reverseGeocode } from '../lib/geocoding';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import {
+  getUserFoldersOptimized,
+  createFolderDoc,
+  updateFolderDoc,
+  createPhotoDoc,
+  uploadImageFile,
+} from '../lib/firestoreService';
 
 function resizeImageToBlob(file: File, maxWidth: number, maxHeight: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -80,12 +86,11 @@ function resizeImageToDataUrl(file: File, maxWidth: number, maxHeight: number): 
 
 async function uploadToStorage(userId: string, file: File, blob: Blob): Promise<string> {
   try {
-    const name = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const fileToUpload = new File([blob], name, { type: 'image/jpeg' });
-    const res = await api.uploadPhoto(fileToUpload);
-    return res.url;
+    const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const fileToUpload = new File([blob], filename, { type: 'image/jpeg' });
+    return await uploadImageFile(fileToUpload, `photos/${userId}/${filename}`);
   } catch (err) {
-    console.warn('API upload failed, falling back to data URL:', err);
+    console.warn('Firebase storage upload failed, falling back to data URL:', err);
     return await resizeImageToDataUrl(file, 800, 800);
   }
 }
@@ -136,8 +141,15 @@ export default function Upload() {
     if (!user) return;
     const fetchFolders = async () => {
       try {
-        const res = await api.get<{ folders: any[] }>('/api/v1/folders?limit=1000');
-        setFolders(res.folders);
+        const userFolders = await getUserFoldersOptimized(user.uid, 100);
+        setFolders(userFolders.map(f => ({
+          id: f.id || '',
+          name: f.name,
+          centerLat: f.centerLat,
+          centerLng: f.centerLng,
+          photoCount: f.photoCount,
+          coverPhotoUrl: f.coverPhotoUrl,
+        })));
       } catch (e) {
         console.error('Failed to fetch folders:', e);
       }
@@ -151,20 +163,24 @@ export default function Upload() {
       const folder = folders.find(f => f.id === folderId);
       if (!folder) return;
       
-      await api.post('/api/v1/photos', {
+      await createPhotoDoc({
+        uid: user.uid,
         url: item.url,
         latitude: folder.centerLat,
         longitude: folder.centerLng,
         takenAt: item.takenAt,
         hasGps: true,
-        folderId: folder.id
+        folderId: folder.id,
+        uploadedAt: new Date().toISOString(),
       });
 
-      if (!folder.coverPhotoUrl) {
-        await api.put(`/api/v1/folders/${folder.id}`, { coverPhotoUrl: item.url });
-      }
+      const newCover = folder.coverPhotoUrl || item.url;
+      await updateFolderDoc(folder.id, {
+        photoCount: folder.photoCount + 1,
+        coverPhotoUrl: newCover,
+      });
 
-      setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, photoCount: f.photoCount + 1, coverPhotoUrl: f.coverPhotoUrl || item.url } as any : f));
+      setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, photoCount: f.photoCount + 1, coverPhotoUrl: newCover } : f));
 
     } catch (err) {
       console.error(err);
@@ -196,39 +212,48 @@ export default function Upload() {
     
     try {
       let matchingFolder = findMatchingFolder(lat, lng, folders);
-      let folderId;
+      let folderId: string;
 
       if (matchingFolder && !customLocationName) {
         const newCount = matchingFolder.photoCount + 1;
         const newLat = ((matchingFolder.centerLat * matchingFolder.photoCount) + lat) / newCount;
         const newLng = ((matchingFolder.centerLng * matchingFolder.photoCount) + lng) / newCount;
+        const newCover = matchingFolder.coverPhotoUrl || pickingItem.url;
 
-        await api.put(`/api/v1/folders/${matchingFolder.id}`, {
+        await updateFolderDoc(matchingFolder.id, {
           centerLat: newLat,
           centerLng: newLng,
-          coverPhotoUrl: matchingFolder.coverPhotoUrl || pickingItem.url
+          photoCount: newCount,
+          coverPhotoUrl: newCover,
         });
-        setFolders(prev => prev.map(f => f.id === matchingFolder.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: matchingFolder.coverPhotoUrl || pickingItem.url} as any : f));
+
+        setFolders(prev => prev.map(f => f.id === matchingFolder!.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: newCover} : f));
         folderId = matchingFolder.id;
       } else {
         const name = customLocationName.trim() || await reverseGeocode(lat, lng);
-        const newFolder = await api.post<any>('/api/v1/folders', {
+        const newFolder = await createFolderDoc({
+          uid: user.uid,
           name,
           centerLat: lat,
           centerLng: lng,
-          coverPhotoUrl: pickingItem.url
+          coverPhotoUrl: pickingItem.url,
+          photoCount: 1,
+          createdAt: new Date().toISOString(),
+          visibility: 'private',
         });
-        folderId = newFolder.id;
+        folderId = newFolder.id || '';
         setFolders(prev => [...prev, { id: folderId, name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: pickingItem.url }]);
       }
 
-      await api.post('/api/v1/photos', {
+      await createPhotoDoc({
+        uid: user.uid,
         url: pickingItem.url,
         latitude: lat,
         longitude: lng,
         takenAt: pickingItem.takenAt,
         hasGps: true,
-        folderId
+        folderId,
+        uploadedAt: new Date().toISOString(),
       });
 
     } catch (err) {
@@ -284,32 +309,41 @@ export default function Upload() {
         const newCount = matchingFolder.photoCount + 1;
         const newLat = ((matchingFolder.centerLat * matchingFolder.photoCount) + lat) / newCount;
         const newLng = ((matchingFolder.centerLng * matchingFolder.photoCount) + lng) / newCount;
+        const newCover = matchingFolder.coverPhotoUrl || url;
 
-        await api.put(`/api/v1/folders/${matchingFolder.id}`, {
+        await updateFolderDoc(matchingFolder.id, {
           centerLat: newLat,
           centerLng: newLng,
-          coverPhotoUrl: matchingFolder.coverPhotoUrl || url
+          photoCount: newCount,
+          coverPhotoUrl: newCover,
         });
-        setFolders(prev => prev.map(f => f.id === matchingFolder.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: matchingFolder.coverPhotoUrl || url} as any : f));
+
+        setFolders(prev => prev.map(f => f.id === matchingFolder!.id ? {...f, photoCount: newCount, centerLat: newLat, centerLng: newLng, coverPhotoUrl: newCover} : f));
       } else {
         const name = await reverseGeocode(lat, lng);
-        const newFolder = await api.post<any>('/api/v1/folders', {
+        const newFolder = await createFolderDoc({
+          uid: user.uid,
           name,
           centerLat: lat,
           centerLng: lng,
-          coverPhotoUrl: url
+          coverPhotoUrl: url,
+          photoCount: 1,
+          createdAt: new Date().toISOString(),
+          visibility: 'private',
         });
-        matchingFolder = { id: newFolder.id, photoCount: 1, centerLat: lat, centerLng: lng, coverPhotoUrl: url };
-        setFolders(prev => [...prev, { id: newFolder.id, name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: url }]);
+        matchingFolder = { id: newFolder.id || '', photoCount: 1, centerLat: lat, centerLng: lng, coverPhotoUrl: url, name };
+        setFolders(prev => [...prev, { id: newFolder.id || '', name, centerLat: lat, centerLng: lng, photoCount: 1, coverPhotoUrl: url }]);
       }
 
-      await api.post('/api/v1/photos', {
+      await createPhotoDoc({
+        uid: user.uid,
         url,
         latitude: lat,
         longitude: lng,
         takenAt,
         hasGps: true,
-        folderId: matchingFolder.id
+        folderId: matchingFolder.id,
+        uploadedAt: new Date().toISOString(),
       });
 
       setProgress(prev => ({ ...prev, [file.name]: 100 }));

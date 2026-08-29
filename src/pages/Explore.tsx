@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../lib/api';
 import { Search, TrendingUp, MapPin, Globe, Camera, Compass } from 'lucide-react';
 import { LazyImagePlaceholder } from '../components/LazyImage';
 import { ErrorFallback } from '../components/ErrorFallback';
 import type { LocationFolder, UserProfile, Photo } from '../types';
+import { getPublicFolders, getPublicPhotos } from '../lib/firestoreService';
 
 type FilterTab = 'all' | 'popular' | 'recent';
 
@@ -137,16 +137,19 @@ export default function Explore() {
     setLoadingFolders(true);
     setFoldersError(null);
     try {
-      const order = tab === 'recent' ? 'createdAt' : 'photoCount';
-      const res = await api.get<{ folders: any[] }>(`/api/v1/explore/folders?limit=12&orderBy=${order}`);
-      
-      const enriched = res.folders.map(f => ({
+      const publicFolders = await getPublicFolders(30);
+      const enriched: FolderWithOwner[] = publicFolders.map((f) => ({
         ...f,
-        ownerProfile: f.user ? {
-          displayName: f.user.displayName,
-          avatarUrl: f.user.avatarUrl
-        } : undefined
+        id: f.id || '',
+        ownerProfile: undefined,
       }));
+
+      if (tab === 'recent') {
+        enriched.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      } else {
+        enriched.sort((a, b) => (b.photoCount || 0) - (a.photoCount || 0));
+      }
+
       setFolders(enriched);
     } catch (err: any) {
       console.error('Failed to fetch public folders:', err);
@@ -162,8 +165,8 @@ export default function Explore() {
     setLoadingPhotos(true);
     setPhotosError(null);
     try {
-      const res = await api.get<{ photos: any[] }>('/api/v1/explore/photos?limit=24');
-      setPhotos(res.photos);
+      const publicPhotos = await getPublicPhotos(50);
+      setPhotos(publicPhotos.map((p) => ({ ...p, id: p.id || '' })));
     } catch (err: any) {
       console.error('Failed to fetch public photos:', err);
       setPhotosError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải ảnh công khai'));
@@ -183,13 +186,19 @@ export default function Explore() {
     const fetchSearched = async () => {
       setLoadingFolders(true);
       try {
-        const res = await api.get<{ folders: any[] }>(`/api/v1/explore/folders?limit=20&search=${encodeURIComponent(searchQuery)}`);
-        const enriched = res.folders.map(f => ({
+        const allPublic = await getPublicFolders(50);
+        const lower = searchQuery.toLowerCase();
+        const matched = allPublic.filter(
+          (f) =>
+            f.name.toLowerCase().includes(lower) ||
+            f.city?.toLowerCase().includes(lower) ||
+            f.country?.toLowerCase().includes(lower) ||
+            f.description?.toLowerCase().includes(lower)
+        );
+        const enriched: FolderWithOwner[] = matched.map((f) => ({
           ...f,
-          ownerProfile: f.user ? {
-            displayName: f.user.displayName,
-            avatarUrl: f.user.avatarUrl
-          } : undefined
+          id: f.id || '',
+          ownerProfile: undefined,
         }));
         setFolders(enriched);
       } catch (err) {

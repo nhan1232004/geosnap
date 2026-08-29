@@ -10,8 +10,8 @@ import {
 } from 'lucide-react';
 import { format, subYears, startOfWeek, addDays } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { api } from '../lib/api';
 import { ErrorFallback } from '../components/ErrorFallback';
+import { getUserFoldersOptimized, getFriendsList } from '../lib/firestoreService';
 
 interface DashboardData {
   stats: {
@@ -400,8 +400,59 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get<DashboardData>('/api/v1/dashboard/stats');
-      setData(res);
+      const [folders, friends] = await Promise.all([
+        getUserFoldersOptimized(user.uid, 500),
+        getFriendsList(user.uid),
+      ]);
+
+      const totalPhotos = folders.reduce((sum, f) => sum + (f.photoCount || 0), 0);
+      const countries = Array.from(new Set(folders.map((f) => f.country).filter(Boolean))) as string[];
+
+      // Build monthly counts
+      const monthlyMap: Record<string, number> = {};
+      const heatmap: Record<string, number> = {};
+
+      const now = new Date();
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = format(d, 'MM/yyyy');
+        monthlyMap[key] = 0;
+      }
+
+      folders.forEach((f) => {
+        if (f.createdAt) {
+          const date = new Date(f.createdAt);
+          const monthKey = format(date, 'MM/yyyy');
+          if (monthlyMap[monthKey] !== undefined) {
+            monthlyMap[monthKey] += f.photoCount || 1;
+          }
+          const dayKey = format(date, 'yyyy-MM-dd');
+          heatmap[dayKey] = (heatmap[dayKey] || 0) + (f.photoCount || 1);
+        }
+      });
+
+      const monthlyData = Object.entries(monthlyMap).map(([month, count]) => ({
+        month,
+        count,
+      }));
+
+      const topFolders = [...folders].sort((a, b) => (b.photoCount || 0) - (a.photoCount || 0)).slice(0, 5);
+
+      setData({
+        stats: {
+          totalPhotos,
+          totalLocations: folders.length,
+          totalCountries: countries.length,
+          totalFriends: friends.length,
+          countries,
+          farthestLocation: folders[0]?.name || 'Chưa xác định',
+          mostActiveMonth: monthlyData[0]?.month || 'Không có',
+        },
+        topFolders,
+        monthlyData,
+        heatmap,
+        timeline: folders,
+      });
     } catch (err: any) {
       console.error('Dashboard data fetch error:', err);
       setError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải dữ liệu thống kê'));

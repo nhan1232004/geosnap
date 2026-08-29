@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { UserProfile } from '../types';
+import { getUserByInviteCode, sendFriendRequestDoc, getFriendsList } from '../lib/firestoreService';
 
 type PageState = 'loading' | 'found' | 'not-found' | 'already-friends' | 'pending' | 'self' | 'sent';
 
@@ -20,17 +20,21 @@ export default function InvitePage() {
     
     const fetchInviterAndStatus = async () => {
       try {
-        const inviterData = await api.get<UserProfile>(`/api/v1/users?inviteCode=${code}`);
+        const inviterData = await getUserByInviteCode(code);
+        if (!inviterData) {
+          setState('not-found');
+          return;
+        }
         setInviter(inviterData);
 
         if (user) {
           if (user.uid === inviterData.uid) { setState('self'); return; }
           
           // Check existing friendship
-          const res = await api.get<{ friendship: any }>(`/api/v1/friendships/status?userId=${inviterData.uid}`);
-          if (res.friendship) {
-            const status = res.friendship.status;
-            setState(status === 'accepted' ? 'already-friends' : 'pending');
+          const friends = await getFriendsList(user.uid);
+          const isFriend = friends.some((f) => f.uid === inviterData.uid);
+          if (isFriend) {
+            setState('already-friends');
             return;
           }
         }
@@ -47,14 +51,13 @@ export default function InvitePage() {
   const handleSendRequest = async () => {
     if (!inviter) return;
     if (!user) {
-      // Save intent and redirect to login
       sessionStorage.setItem('pendingInviteCode', code || '');
       navigate('/login');
       return;
     }
     setSending(true);
     try {
-      await api.post('/api/v1/friendships', { addresseeId: inviter.uid });
+      await sendFriendRequestDoc(user.uid, inviter.uid);
       setState('sent');
     } catch (e) {
       console.error('Failed to send friend request:', e);

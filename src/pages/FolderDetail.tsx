@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api } from '../lib/api';
 import { LocationFolder, Photo, Comment } from '../types';
+import {
+  getFolderById,
+  getPhotosByFolderOptimized,
+  getCommentsByFolderOptimized,
+  updateFolderDoc,
+  createCommentDoc,
+} from '../lib/firestoreService';
 import {
   ArrowLeft,
   MapPin,
@@ -79,20 +85,22 @@ export default function FolderDetail() {
     setLoading(true);
     setError(null);
     try {
-      const folderData = await api.get<LocationFolder>(`/api/v1/folders/${id}`);
+      const folderData = await getFolderById(id);
+      if (!folderData) {
+        throw new Error('Không tìm thấy địa điểm');
+      }
       setFolder(folderData);
       setDescInput(folderData.description || '');
 
-      const photoData = await api.get<{ photos: Photo[] }>(`/api/v1/photos?folderId=${id}`);
-      const fetchedPhotos = photoData.photos;
+      const fetchedPhotos = await getPhotosByFolderOptimized(id, 200);
       fetchedPhotos.sort((a, b) => {
         if (!a.takenAt || !b.takenAt) return 0;
         return new Date(b.takenAt).getTime() - new Date(a.takenAt).getTime();
       });
       setPhotos(fetchedPhotos);
 
-      const commentData = await api.get<{ comments: Comment[] }>(`/api/v1/comments?folderId=${id}`);
-      setComments(commentData.comments);
+      const commentsList = await getCommentsByFolderOptimized(id, 100);
+      setComments(commentsList);
     } catch (err: any) {
       console.error('Failed to fetch folder details:', err);
       setError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải chi tiết địa điểm'));
@@ -110,7 +118,7 @@ export default function FolderDetail() {
   const updateVisibility = async (vis: 'private' | 'friends' | 'public') => {
     if (!folder?.id) return;
     try {
-      await api.put(`/api/v1/folders/${folder.id}`, { visibility: vis });
+      await updateFolderDoc(folder.id, { visibility: vis });
       setFolder({ ...folder, visibility: vis });
     } catch (e) {
       console.error('Failed to update visibility', e);
@@ -120,7 +128,7 @@ export default function FolderDetail() {
   const saveDescription = async () => {
     if (!folder?.id) return;
     try {
-      await api.put(`/api/v1/folders/${folder.id}`, { description: descInput.trim() });
+      await updateFolderDoc(folder.id, { description: descInput.trim() });
       setFolder({ ...folder, description: descInput.trim() });
       setIsEditingDesc(false);
     } catch (e) {
@@ -138,7 +146,7 @@ export default function FolderDetail() {
       newReactions[user.uid] = emoji;
     }
     try {
-      await api.put(`/api/v1/folders/${folder.id}`, { reactions: newReactions });
+      await updateFolderDoc(folder.id, { reactions: newReactions });
       setFolder({ ...folder, reactions: newReactions });
       setShowEmojiPicker(false);
     } catch (e) {
@@ -150,9 +158,21 @@ export default function FolderDetail() {
     e.preventDefault();
     if (!newComment.trim() || !folder || !user) return;
     try {
-      const createdComment = await api.post<Comment>('/api/v1/comments', {
+      const createdComment = await createCommentDoc({
+        uid: user.uid,
         folderId: folder.id,
         content: newComment.trim(),
+        createdAt: new Date().toISOString(),
+        userProfile: user
+          ? {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName || 'Người dùng',
+              avatarUrl: user.avatarUrl || undefined,
+              role: 'user',
+              createdAt: new Date().toISOString(),
+            }
+          : undefined,
       });
       setComments((prev) => [...prev, createdComment]);
       setNewComment('');

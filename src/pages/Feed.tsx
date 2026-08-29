@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { LocationFolder, UserProfile, Post, FeedItem } from '../types';
 import { Link } from 'react-router-dom';
@@ -9,6 +8,16 @@ import { PostItem } from '../components/feed/PostItem';
 import { useToast } from '../components/ToastContainer';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { Loader2 } from 'lucide-react';
+import {
+  getUserFeedOptimized,
+  getActiveStories,
+  createPostDoc,
+  togglePostReactionDoc,
+  uploadImageFile,
+  updateFolderDoc,
+  getUserFoldersOptimized,
+  getFriendsList,
+} from '../lib/firestoreService';
 
 export default function Feed() {
   const { user } = useAppStore();
@@ -28,71 +37,39 @@ export default function Feed() {
     setDisplayLimit(10);
 
     try {
-      // Parallel fetch posts feed, friends' folders and active stories
-      const [feedRes, foldersRes, storiesRes] = await Promise.all([
-        api.get<{ posts: any[] }>('/api/v1/posts/feed?limit=100'),
-        api.get<{ folders: any[] }>('/api/v1/folders/friends'),
-        api.get<{ stories: any[] }>('/api/v1/posts/stories')
+      // Parallel fetch posts feed, friends' folders and active stories from Firestore
+      const [postsList, storiesList, friends] = await Promise.all([
+        getUserFeedOptimized(user.uid, 50),
+        getActiveStories(),
+        getFriendsList(user.uid),
       ]);
 
-      // Map posts to FeedItems and enrich userProfile
-      const mappedPosts: FeedItem[] = feedRes.posts.map(p => {
-        const userProfile: UserProfile = p.user ? {
-          uid: p.user.uid,
-          displayName: p.user.displayName,
-          avatarUrl: p.user.avatarUrl,
-          email: '',
-          role: 'user',
-          createdAt: ''
-        } : { uid: p.uid, email: '', role: 'user', createdAt: '' };
+      const mappedPosts: FeedItem[] = postsList.map((p) => ({
+        id: p.id || '',
+        type: 'post' as const,
+        data: p,
+        createdAt: p.createdAt,
+      }));
 
-        return {
-          id: p.id,
-          type: 'post' as const,
-          data: { ...p, userProfile } as Post,
-          createdAt: p.createdAt
-        };
-      });
+      const friendFolders: FeedItem[] = [];
+      for (const friend of friends) {
+        const folders = await getUserFoldersOptimized(friend.uid, 10);
+        const publicOrFriends = folders.filter((f) => f.visibility !== 'private');
+        publicOrFriends.forEach((f) => {
+          friendFolders.push({
+            id: f.id || '',
+            type: 'folder' as const,
+            data: { ...f, userProfile: friend },
+            createdAt: f.createdAt,
+          });
+        });
+      }
 
-      // Map folders to FeedItems and enrich userProfile
-      const mappedFolders: FeedItem[] = foldersRes.folders.map(f => {
-        const userProfile: UserProfile = f.user ? {
-          uid: f.user.id,
-          displayName: f.user.displayName,
-          avatarUrl: f.user.avatarUrl,
-          email: '',
-          role: 'user',
-          createdAt: ''
-        } : { uid: f.uid, email: '', role: 'user', createdAt: '' };
-
-        return {
-          id: f.id,
-          type: 'folder' as const,
-          data: { ...f, userProfile } as LocationFolder & { userProfile: UserProfile },
-          createdAt: f.createdAt
-        };
-      });
-
-      // Combine and sort
-      const combined = [...mappedPosts, ...mappedFolders];
+      const combined = [...mappedPosts, ...friendFolders];
       combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-      // Enrich stories
-      const enrichedStories = storiesRes.stories.map(s => {
-        const userProfile: UserProfile = s.user ? {
-          uid: s.user.uid,
-          displayName: s.user.displayName,
-          avatarUrl: s.user.avatarUrl,
-          email: '',
-          role: 'user',
-          createdAt: ''
-        } : { uid: s.uid, email: '', role: 'user', createdAt: '' };
-
-        return { ...s, userProfile } as Post & { userProfile: UserProfile };
-      });
-
       setFeed(combined);
-      setStories(enrichedStories);
+      setStories(storiesList);
     } catch (e: any) {
       console.error('Error fetching feed:', e);
       setError(e instanceof Error ? e : new Error(e?.message || 'Không thể tải bảng tin'));
@@ -129,20 +106,25 @@ export default function Feed() {
   const handleCreatePost = async (content: string, files: File[]) => {
     if (!user) return;
     try {
-      // Upload images to R2 storage
+      // Upload images to Firebase Storage
       const urls = await Promise.all(
         files.map(async (file) => {
-          const res = await api.uploadPhoto(file);
-          return res.url;
+          const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+          return await uploadImageFile(file, `posts/${user.uid}/${filename}`);
         })
       );
 
-      // Create post record
-      await api.post('/api/v1/posts', {
+      // Create post in Firestore
+      await createPostDoc({
+        uid: user.uid,
         type: 'post',
         content: content.trim(),
         imageUrls: urls,
-        visibility: 'friends'
+        visibility: 'friends',
+        reactions: {},
+        commentCount: 0,
+        shareCount: 0,
+        createdAt: new Date().toISOString(),
       });
 
       toast('Bài viết đã được đăng thành công!', 'success');
@@ -157,16 +139,23 @@ export default function Feed() {
   const handleCreateStory = async (file: File) => {
     if (!user) return;
     try {
-      const res = await api.uploadPhoto(file);
+      const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const url = await uploadImageFile(file, `stories/${user.uid}/${filename}`);
 
       const expires = new Date();
       expires.setHours(expires.getHours() + 24);
 
-      await api.post('/api/v1/posts', {
+      await createPostDoc({
+        uid: user.uid,
         type: 'story',
-        imageUrls: [res.url],
+        content: '',
+        imageUrls: [url],
         expiresAt: expires.toISOString(),
-        visibility: 'friends'
+        visibility: 'friends',
+        reactions: {},
+        commentCount: 0,
+        shareCount: 0,
+        createdAt: new Date().toISOString(),
       });
       toast('Tin đã được tạo thành công!', 'success');
       fetchFeed();
@@ -190,22 +179,22 @@ export default function Feed() {
     
     try {
       if (itemType === 'post') {
-        // Post reaction API
-        const reactionEmoji = hasReacted ? null : emoji;
-        const res = await api.put<{ reactions: any }>(`/api/v1/posts/${itemId}/react`, { emoji: reactionEmoji });
-        
-        const newFeed = [...feed];
-        newFeed[itemIdx] = { ...item, data: { ...data, reactions: res.reactions } };
-        setFeed(newFeed);
-      } else {
-        // Folder reaction API
+        await togglePostReactionDoc(itemId, user.uid, emoji);
         if (hasReacted) {
           delete newReactions[user.uid];
         } else {
           newReactions[user.uid] = emoji;
         }
-        await api.put(`/api/v1/folders/${itemId}`, { reactions: newReactions });
-        
+        const newFeed = [...feed];
+        newFeed[itemIdx] = { ...item, data: { ...data, reactions: newReactions } };
+        setFeed(newFeed);
+      } else {
+        if (hasReacted) {
+          delete newReactions[user.uid];
+        } else {
+          newReactions[user.uid] = emoji;
+        }
+        await updateFolderDoc(itemId, { reactions: newReactions });
         const newFeed = [...feed];
         newFeed[itemIdx] = { ...item, data: { ...data, reactions: newReactions } };
         setFeed(newFeed);

@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { UserProfile, LocationFolder, Friendship } from '../types';
 import {
@@ -17,6 +16,13 @@ import {
   X,
 } from 'lucide-react';
 import { useToast } from '../components/ToastContainer';
+import {
+  getUserProfileDoc,
+  updateUserProfileDoc,
+  getUserFoldersOptimized,
+  uploadImageFile,
+  sendFriendRequestDoc,
+} from '../lib/firestoreService';
 
 type TabKey = 'photos' | 'map' | 'liked';
 
@@ -82,18 +88,19 @@ export default function Profile() {
       try {
         setLoading(true);
         // Fetch Profile
-        const userProfileData = await api.get<UserProfile>(`/api/v1/users/${uid}`);
-        setProfile(userProfileData);
+        const userProfileData = await getUserProfileDoc(uid);
+        setProfile(
+          userProfileData || {
+            uid,
+            email: '',
+            displayName: 'Người dùng',
+            role: 'user',
+            createdAt: new Date().toISOString(),
+          }
+        );
 
-        // Fetch Friendship Status (if not self)
-        if (user && user.uid !== uid) {
-          const res = await api.get<{ friendship: Friendship | null }>(`/api/v1/friendships/status?userId=${uid}`);
-          setFriendship(res.friendship);
-        }
-
-        // Fetch Folders (Privacy filters handled by backend)
-        const folderRes = await api.get<{ folders: LocationFolder[] }>(`/api/v1/folders/user/${uid}`);
-        const visibleFolders = folderRes.folders;
+        // Fetch Folders
+        const visibleFolders = await getUserFoldersOptimized(uid, 100);
         visibleFolders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setFolders(visibleFolders);
       } catch (err) {
@@ -122,11 +129,17 @@ export default function Profile() {
     if (!user || !profile) return;
     setSaving(true);
     try {
-      const updatedProfile = await api.put<UserProfile>('/api/v1/users/me', {
+      await updateUserProfileDoc(user.uid, {
         displayName: editForm.displayName,
         bio: editForm.bio,
         avatarUrl: editForm.avatarUrl,
       });
+      const updatedProfile: UserProfile = {
+        ...profile,
+        displayName: editForm.displayName,
+        bio: editForm.bio,
+        avatarUrl: editForm.avatarUrl,
+      };
       setProfile(updatedProfile);
       setUserProfile(updatedProfile);
       setIsEditing(false);
@@ -145,8 +158,9 @@ export default function Profile() {
     if (!file || !user) return;
     setUploadingAvatar(true);
     try {
-      const res = await api.uploadAvatar(file);
-      setEditForm(prev => ({ ...prev, avatarUrl: res.url }));
+      const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const url = await uploadImageFile(file, `avatars/${user.uid}/${filename}`);
+      setEditForm(prev => ({ ...prev, avatarUrl: url }));
     } catch (err) {
       console.error(err);
       toast('Không thể tải ảnh đại diện lên.', 'error');
@@ -161,8 +175,10 @@ export default function Profile() {
     if (!file || !user || !profile) return;
     setUploadingCover(true);
     try {
-      const res = await api.uploadCover(file);
-      setProfile(prev => prev ? { ...prev, coverUrl: res.url } : prev);
+      const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const url = await uploadImageFile(file, `covers/${user.uid}/${filename}`);
+      await updateUserProfileDoc(user.uid, { coverUrl: url });
+      setProfile(prev => prev ? { ...prev, coverUrl: url } : prev);
       toast('Ảnh bìa đã được cập nhật!', 'success');
     } catch (err) {
       console.error(err);
@@ -177,8 +193,14 @@ export default function Profile() {
     if (!profile || !user) return;
     setSendingRequest(true);
     try {
-      const res = await api.post<{ friendship: Friendship }>('/api/v1/friendships', { addresseeId: profile.uid });
-      setFriendship(res.friendship);
+      await sendFriendRequestDoc(user.uid, profile.uid);
+      setFriendship({
+        id: `${user.uid}_${profile.uid}`,
+        requesterId: user.uid,
+        addresseeId: profile.uid,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      });
       toast('Đã gửi lời mời kết bạn!', 'success');
     } catch (e) {
       console.error(e);

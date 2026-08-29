@@ -47,6 +47,7 @@ import { CoverPicker } from '../components/workspace/CoverPicker';
 import { ShareModal } from '../components/workspace/ShareModal';
 import { MigrationModal } from '../components/workspace/MigrationModal';
 import { CommandPalette } from '../components/workspace/CommandPalette';
+import { AiAssistantModal } from '../components/workspace/AiAssistantModal';
 
 import GalleryView from '../components/workspace/views/GalleryView';
 import MapView from '../components/workspace/views/MapView';
@@ -91,6 +92,7 @@ export default function WorkspacePage() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Slash Menu State
@@ -459,10 +461,20 @@ export default function WorkspacePage() {
                   <Star className={`w-4 h-4 ${isFavorite ? 'fill-amber-400' : ''}`} />
                 </button>
 
+                {/* AI Assistant Button */}
+                <button
+                  onClick={() => setIsAiModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-brand/10 hover:bg-brand/20 border border-brand/30 text-brand rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                  title="Trợ lý du lịch Gemini AI"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Trợ lý AI</span>
+                </button>
+
                 {/* Share Button */}
                 <button
                   onClick={() => setIsShareModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface hover:bg-surface-hover border border-border-dim rounded-xl text-xs font-semibold text-text-main transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface hover:bg-surface-hover border border-border-dim rounded-xl text-xs font-semibold text-text-main transition-all cursor-pointer"
                 >
                   <Share2 className="w-3.5 h-3.5 text-brand" />
                   <span className="hidden sm:inline">Chia sẻ</span>
@@ -729,6 +741,29 @@ export default function WorkspacePage() {
             if (workspace) {
               getPageTree(workspace.id).then(setPageTree);
             }
+          }}
+        />
+      )}
+
+      {/* AI Assistant Modal */}
+      {isAiModalOpen && currentPage && (
+        <AiAssistantModal
+          isOpen={isAiModalOpen}
+          currentPage={currentPage}
+          currentBlocks={blocks}
+          onClose={() => setIsAiModalOpen(false)}
+          onInsertBlocks={async (newBlocks) => {
+            const addedBlocks: Block[] = [];
+            for (let i = 0; i < newBlocks.length; i++) {
+              const b = newBlocks[i];
+              const created = await createBlock(
+                currentPage.id,
+                b.type || 'paragraph',
+                b.data || {}
+              );
+              addedBlocks.push(created);
+            }
+            setBlocks((prev) => [...prev, ...addedBlocks]);
           }}
         />
       )}

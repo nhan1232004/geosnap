@@ -2,10 +2,10 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { useToast } from '../components/ToastContainer';
 import { LocationFolder, UserProfile } from '../types';
+import { getUserFoldersOptimized, getFriendsList } from '../lib/firestoreService';
 import { Link } from 'react-router-dom';
 import { Users, User as UserIcon, MapPin, Calendar, Filter, X } from 'lucide-react';
 import { ErrorFallback } from '../components/ErrorFallback';
@@ -81,8 +81,8 @@ export default function MapViewPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get<{ folders: LocationFolder[] }>('/api/v1/folders?limit=1000');
-      const data = res.folders.map(folder => ({ ...folder, isMine: true }));
+      const items = await getUserFoldersOptimized(user.uid, 500);
+      const data: MapFolder[] = items.map((folder) => ({ ...folder, isMine: true }));
       setMyFolders(data);
     } catch (e: any) {
       console.error('Failed to load my folders:', e);
@@ -101,17 +101,20 @@ export default function MapViewPage() {
   const fetchFriendFolders = useCallback(async () => {
     if (!user) return;
     try {
-      const res = await api.get<{ folders: any[] }>('/api/v1/folders/friends');
-      const enriched = res.folders.map(folder => ({
-        ...folder,
-        isMine: false,
-        userProfile: folder.user ? {
-          uid: folder.user.id,
-          displayName: folder.user.displayName,
-          avatarUrl: folder.user.avatarUrl
-        } : undefined
-      }));
-      setFriendFolders(enriched);
+      const friends = await getFriendsList(user.uid);
+      const allFriendFolders: MapFolder[] = [];
+      for (const friend of friends) {
+        const folders = await getUserFoldersOptimized(friend.uid, 100);
+        const publicOrFriends = folders.filter((f) => f.visibility !== 'private');
+        publicOrFriends.forEach((f) => {
+          allFriendFolders.push({
+            ...f,
+            isMine: false,
+            userProfile: friend,
+          });
+        });
+      }
+      setFriendFolders(allFriendFolders);
     } catch (e) {
       console.error(e);
       toast('Không thể tải hành trình của bạn bè', 'error');

@@ -4,9 +4,13 @@ import { Link } from 'react-router-dom';
 import { FeedItem, Comment } from '../../types';
 import { timeAgo } from '../../lib/utils';
 import { useAppStore } from '../../store/useAppStore';
-import { api } from '../../lib/api';
 import { useToast } from '../ToastContainer';
 import { useLightbox } from '../Lightbox';
+import {
+  getCommentsByFolderOptimized,
+  createCommentDoc,
+  deleteCommentDoc,
+} from '../../lib/firestoreService';
 
 interface PostItemProps {
   item: FeedItem;
@@ -151,15 +155,14 @@ export function PostItem({ item, handleReaction }: PostItemProps) {
   const fetchComments = useCallback(async () => {
     setLoadingComments(true);
     try {
-      const param = item.type === 'post' ? `postId=${item.id}` : `folderId=${item.id}`;
-      const res = await api.get<{ comments: Comment[] }>(`/api/v1/comments?${param}`);
-      setComments(res.comments);
+      const commentsList = await getCommentsByFolderOptimized(item.id, 50);
+      setComments(commentsList);
     } catch (e) {
       console.error(e);
     } finally {
       setLoadingComments(false);
     }
-  }, [item.id, item.type]);
+  }, [item.id]);
 
   useEffect(() => {
     fetchComments();
@@ -170,12 +173,21 @@ export function PostItem({ item, handleReaction }: PostItemProps) {
     if (!newComment.trim() || !user) return;
 
     try {
-      const body = {
-        ...(item.type === 'post' ? { postId: item.id } : { folderId: item.id }),
+      const createdComment = await createCommentDoc({
+        uid: user.uid,
+        folderId: item.id,
         content: newComment.trim(),
-      };
-      const res = await api.post<Comment>(`/api/v1/comments`, body);
-      setComments((prev) => [...prev, res]);
+        createdAt: new Date().toISOString(),
+        userProfile: {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName || 'Người dùng',
+          avatarUrl: user.avatarUrl || undefined,
+          role: 'user',
+          createdAt: new Date().toISOString(),
+        },
+      });
+      setComments((prev) => [...prev, createdComment]);
       setNewComment('');
     } catch (e: any) {
       console.error(e);
@@ -185,7 +197,7 @@ export function PostItem({ item, handleReaction }: PostItemProps) {
 
   const handleDeleteComment = async (commentId: string) => {
     try {
-      await api.delete(`/api/v1/comments/${commentId}`);
+      await deleteCommentDoc(commentId);
       setComments((prev) => prev.filter((c) => c.id !== commentId));
       toast('Bình luận đã được xoá', 'success');
     } catch (e: any) {

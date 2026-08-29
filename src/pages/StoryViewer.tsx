@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { X, ChevronLeft, ChevronRight, Trash2, Volume2, VolumeX } from 'lucide-react';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { Post, UserProfile } from '../types';
 import { useToast } from '../components/ToastContainer';
+import { getActiveStories, deletePostDoc } from '../lib/firestoreService';
 
 type StoryWithProfile = Post & { userProfile?: UserProfile };
 
@@ -116,21 +116,8 @@ export default function StoryViewer() {
     const fetchStories = async () => {
       setLoadingStories(true);
       try {
-        const res = await api.get<{ stories: any[] }>('/api/v1/posts/stories');
-        const enriched: StoryWithProfile[] = res.stories.map(story => {
-          const userProfile: UserProfile = story.user ? {
-            uid: story.user.uid,
-            displayName: story.user.displayName,
-            avatarUrl: story.user.avatarUrl,
-            email: '',
-            role: 'user',
-            createdAt: ''
-          } : { uid: story.uid, email: '', role: 'user', createdAt: '' };
-
-          return { ...story, userProfile };
-        });
-
-        setStories(enriched);
+        const storiesList = await getActiveStories();
+        setStories(storiesList);
       } catch (e: any) {
         console.error(e);
         toast('Không thể tải tin: ' + (e.message || 'Lỗi kết nối'), 'error');
@@ -185,7 +172,7 @@ export default function StoryViewer() {
     if (!currentStory?.id) return;
     setDeleting(true);
     try {
-      await api.delete(`/api/v1/posts/${currentStory.id}`);
+      await deletePostDoc(currentStory.id);
       toast('Đã xóa tin thành công', 'success');
       const updated = stories.filter((_, i) => i !== currentIndex);
       if (updated.length === 0) {

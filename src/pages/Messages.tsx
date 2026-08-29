@@ -3,9 +3,14 @@ import { useAppStore } from '../store/useAppStore';
 import { useToast } from '../components/ToastContainer';
 import { Send, Trash2, ArrowLeft, UserPlus } from 'lucide-react';
 import { timeAgo } from '../lib/utils';
-import { api } from '../lib/api';
-import { getSocket, joinConversation, leaveConversation } from '../lib/socket';
 import { ErrorFallback } from '../components/ErrorFallback';
+import {
+  getFriendsList,
+  subscribeConversationMessages,
+  sendMessageDoc,
+  deleteMessageDoc,
+} from '../lib/firestoreService';
+import type { Message as FirestoreMessage } from '../types';
 
 interface Message {
   id: string;
@@ -59,145 +64,80 @@ export default function Messages() {
     try {
       setLoading(true);
       setError(null);
-      const [friendsRes, convosRes] = await Promise.all([
-        api.get<{ friendships: any[] }>('/api/v1/friendships'),
-        api.get<{ conversations: any[] }>('/api/v1/messages/conversations')
-      ]);
+      const friends = await getFriendsList(user.uid);
 
-      const friendsList = friendsRes.friendships
-        .filter(f => f.status === 'accepted')
-        .map(f => {
-          const other = f.requesterId === user.uid ? f.addressee : f.requester;
-          return {
-            id: other.id,
-            displayName: other.displayName || 'User',
-            avatarUrl: other.avatarUrl
-          };
-        });
+      const friendsList: Friend[] = friends.map((f) => ({
+        id: f.uid,
+        displayName: f.displayName || 'User',
+        avatarUrl: f.avatarUrl,
+      }));
       setAvailableFriends(friendsList);
 
-      const convosList: Conversation[] = convosRes.conversations.map(c => ({
-        id: c.otherUser?.id || '',
-        userId: c.otherUser?.id || '',
-        userName: c.otherUser?.displayName || 'User',
-        userAvatar: c.otherUser?.avatarUrl,
-        lastMessage: c.lastMessage || 'Bắt đầu cuộc trò chuyện',
-        lastMessageTime: c.lastAt ? timeAgo(c.lastAt) : 'Vừa xong',
-        unread: 0
+      const convosList: Conversation[] = friendsList.map((f) => ({
+        id: f.id,
+        userId: f.id,
+        userName: f.displayName,
+        userAvatar: f.avatarUrl,
+        lastMessage: 'Bắt đầu cuộc trò chuyện',
+        lastMessageTime: 'Mới',
+        unread: 0,
       }));
-      setConversations(convosList.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()));
+      setConversations(convosList);
     } catch (e: any) {
       console.error('Error fetching conversations:', e);
       setError(e instanceof Error ? e : new Error(e?.message || 'Lỗi tải hội thoại'));
-      toast('Lỗi tải hội thoại: ' + (e?.message || 'Unknown error'), 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch conversations and available friends
   useEffect(() => {
     fetchData();
   }, [user]);
 
-  // Listen to messages for selected conversation
+  // Realtime Firestore Snapshot listener for selected conversation
   useEffect(() => {
     if (!user || !selectedUserId) return;
 
     const conversationId = [user.uid, selectedUserId].sort().join('_');
-    console.log('Setting up message listener for:', conversationId);
 
-    let active = true;
-
-    // Load message history
-    const loadHistory = async () => {
-      try {
-        const res = await api.get<{ messages: any[] }>(`/api/v1/messages/${conversationId}`);
-        if (!active) return;
-        setMessages(
-          res.messages.map(msg => ({
-            id: msg.id,
-            senderId: msg.senderId,
-            senderName: msg.sender?.displayName || 'User',
-            senderAvatar: msg.sender?.avatarUrl,
-            recipientId: msg.recipientId,
-            content: msg.content,
-            createdAt: msg.createdAt,
-          }))
-        );
-      } catch (e: any) {
-        console.error('Error fetching history:', e);
-        toast('Lỗi tải lịch sử tin nhắn: ' + (e?.message || 'Unknown error'), 'error');
-      }
-    };
-
-    loadHistory();
-
-    // Join room & listen
-    joinConversation(conversationId);
-    
-    const socket = getSocket();
-    const handleNewMessage = (msg: any) => {
-      if (msg.conversationId === conversationId) {
-        setMessages(prev => {
-          if (prev.some(m => m.id === msg.id)) return prev;
-          return [
-            ...prev,
-            {
-              id: msg.id,
-              senderId: msg.senderId,
-              senderName: msg.sender?.displayName || 'User',
-              senderAvatar: msg.sender?.avatarUrl,
-              recipientId: msg.recipientId,
-              content: msg.content,
-              createdAt: msg.createdAt,
-            }
-          ];
-        });
-
-        // Also update conversations list with the last message
-        setConversations(prev => {
-          return prev.map(c => {
-            if (c.userId === msg.senderId || c.userId === msg.recipientId) {
-              return {
-                ...c,
-                lastMessage: msg.content,
-                lastMessageTime: 'Vừa xong'
-              };
-            }
-            return c;
-          }).sort((a, b) => {
-            if (a.userId === msg.senderId || a.userId === msg.recipientId) return -1;
-            if (b.userId === msg.senderId || b.userId === msg.recipientId) return 1;
-            return 0;
-          });
-        });
-      }
-    };
-
-    if (socket) {
-      socket.on('new-message', handleNewMessage);
-    }
+    const unsubscribe = subscribeConversationMessages(conversationId, (loadedMessages) => {
+      setMessages(
+        loadedMessages.map((msg) => ({
+          id: msg.id || '',
+          senderId: msg.senderId,
+          senderName: msg.senderName || 'User',
+          senderAvatar: msg.senderAvatar,
+          recipientId: msg.recipientId,
+          content: msg.content,
+          createdAt: msg.createdAt,
+        }))
+      );
+    });
 
     return () => {
-      active = false;
-      leaveConversation(conversationId);
-      if (socket) {
-        socket.off('new-message', handleNewMessage);
-      }
+      unsubscribe();
     };
-  }, [user, selectedUserId, toast]);
+  }, [user, selectedUserId]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !user || !selectedUserId) return;
 
+    const text = newMessage.trim();
+    setNewMessage('');
+    const conversationId = [user.uid, selectedUserId].sort().join('_');
+
     try {
-      await api.post(`/api/v1/messages`, {
+      await sendMessageDoc({
+        conversationId,
+        senderId: user.uid,
+        senderName: user.displayName || 'User',
+        senderAvatar: user.avatarUrl || undefined,
         recipientId: selectedUserId,
-        content: newMessage.trim(),
+        content: text,
+        createdAt: new Date().toISOString(),
       });
-      setNewMessage('');
     } catch (e: any) {
       console.error('Error sending message:', e);
       toast('Không thể gửi tin nhắn: ' + (e?.message || 'Unknown error'), 'error');
@@ -206,8 +146,8 @@ export default function Messages() {
 
   const handleDeleteMessage = async (messageId: string) => {
     try {
-      await api.delete(`/api/v1/messages/${messageId}`);
-      setMessages(prev => prev.filter(m => m.id !== messageId));
+      await deleteMessageDoc(messageId);
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
       toast('Tin nhắn đã được xoá', 'success');
     } catch (e: any) {
       console.error('Error deleting message:', e);

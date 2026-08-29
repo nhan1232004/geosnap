@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { Notification } from '../types';
 import { timeAgo } from '../lib/utils';
-import { api } from '../lib/api';
 import { Bell, X } from 'lucide-react';
+import {
+  subscribeUserNotifications,
+  markNotificationAsReadDoc,
+} from '../lib/firestoreService';
 
 export function NotificationCenter() {
   const { user } = useAppStore();
@@ -11,48 +14,17 @@ export function NotificationCenter() {
   const [showPanel, setShowPanel] = useState(false);
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
-  const fetchNotifications = async () => {
+  useEffect(() => {
     if (!user) return;
-    try {
-      const res = await api.get<{ notifications: any[] }>('/api/v1/notifications');
-      const mapped = res.notifications.map(n => ({
-        id: n.id,
-        recipientId: n.recipientId,
-        actorId: n.actorId,
-        type: n.type,
-        entityId: n.entityId,
-        entityName: n.entityName,
-        isRead: n.isRead,
-        createdAt: n.createdAt,
-        actorProfile: n.actor ? {
-          uid: n.actor.id,
-          displayName: n.actor.displayName || undefined,
-          avatarUrl: n.actor.avatarUrl || undefined,
-          email: '',
-          role: 'user' as const,
-          createdAt: '',
-        } : undefined,
-      }));
-      setNotifications(mapped);
-    } catch (e) {
-      console.error('Failed to fetch notifications:', e);
-    }
-  };
-
-  useEffect(() => {
-    fetchNotifications();
+    const unsubscribe = subscribeUserNotifications(user.uid, (notifs) => {
+      setNotifications(notifs);
+    });
+    return () => unsubscribe();
   }, [user]);
-
-  // Fetch when panel is opened
-  useEffect(() => {
-    if (showPanel) {
-      fetchNotifications();
-    }
-  }, [showPanel]);
 
   const markAsRead = async (notificationId: string) => {
     try {
-      await api.put(`/api/v1/notifications/${notificationId}`, {});
+      await markNotificationAsReadDoc(notificationId);
       setNotifications(prev =>
         prev.map(n => (n.id === notificationId ? { ...n, isRead: true } : n))
       );

@@ -3,6 +3,7 @@ export interface UserProfile {
   email: string;
   displayName?: string;
   avatarUrl?: string;
+  coverUrl?: string;
   role: 'admin' | 'user';
   inviteCode?: string;
   bio?: string;

@@ -1,9 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { Friendship, UserProfile } from '../types';
 import { timeAgo } from '../lib/utils';
 import { ErrorFallback } from '../components/ErrorFallback';
+import {
+  getFriendsList,
+  getPendingFriendRequests,
+  respondFriendRequestDoc,
+} from '../lib/firestoreService';
 
 const EMOJIS = ['✈️', '🗺️', '📸', '🌏', '🏔️', '🏖️'];
 function randomEmoji() { return EMOJIS[Math.floor(Math.random() * EMOJIS.length)]; }
@@ -36,33 +40,34 @@ export default function Friends() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get<{ friendships: any[] }>('/api/v1/friendships');
-      const enriched = res.friendships.map(f => {
-        const isRequester = f.requesterId === user.uid;
-        const other = isRequester ? f.addressee : f.requester;
-        const otherUser: UserProfile = {
-          uid: other.id,
-          email: other.email,
-          displayName: other.displayName || undefined,
-          avatarUrl: other.avatarUrl || undefined,
-          role: 'user',
-          createdAt: '',
-        };
-        return {
-          id: f.id,
-          requesterId: f.requesterId,
-          addresseeId: f.addresseeId,
-          status: f.status,
-          createdAt: f.createdAt,
-          updatedAt: f.updatedAt,
-          otherUser,
-        };
-      });
+      const [friendsList, pendingRequests] = await Promise.all([
+        getFriendsList(user.uid),
+        getPendingFriendRequests(user.uid),
+      ]);
 
-      setFriends(enriched.filter(f => f.status === 'accepted'));
-      const incomingPending = enriched.filter(f => f.status === 'pending' && f.addresseeId === user.uid);
-      setPending(incomingPending);
-      setUnreadNotifications(incomingPending.length);
+      const formattedFriends = friendsList.map((f) => ({
+        id: `${user.uid}_${f.uid}`,
+        requesterId: user.uid,
+        addresseeId: f.uid,
+        status: 'accepted' as const,
+        createdAt: f.createdAt || new Date().toISOString(),
+        otherUser: f,
+      }));
+
+      const formattedPending = pendingRequests.map((p) => ({
+        ...p,
+        otherUser: p.requesterProfile || {
+          uid: p.requesterId,
+          email: '',
+          displayName: 'Người dùng',
+          role: 'user' as const,
+          createdAt: p.createdAt,
+        },
+      }));
+
+      setFriends(formattedFriends);
+      setPending(formattedPending);
+      setUnreadNotifications(formattedPending.length);
     } catch (e: any) {
       console.error('Failed to fetch friendships:', e);
       setError(e instanceof Error ? e : new Error(e?.message || 'Không thể tải danh sách bạn bè'));
@@ -76,7 +81,7 @@ export default function Friends() {
   const handleAccept = async (friendship: Friendship) => {
     if (!friendship.id) return;
     try {
-      await api.put(`/api/v1/friendships/${friendship.id}`, { status: 'accepted' });
+      await respondFriendRequestDoc(friendship.id, 'accepted');
       fetchFriendships();
     } catch (e) {
       console.error('Failed to accept friendship:', e);
@@ -86,7 +91,7 @@ export default function Friends() {
   const handleDecline = async (friendship: Friendship) => {
     if (!friendship.id) return;
     try {
-      await api.put(`/api/v1/friendships/${friendship.id}`, { status: 'blocked' });
+      await respondFriendRequestDoc(friendship.id, 'blocked');
       fetchFriendships();
     } catch (e) {
       console.error('Failed to decline friendship:', e);

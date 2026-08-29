@@ -1,7 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 import { LocationFolder } from '../types';
+import {
+  getUserFoldersOptimized,
+  createFolderDoc,
+  updateFolderDoc,
+  deleteFolderDoc,
+} from '../lib/firestoreService';
 import { useToast } from '../components/ToastContainer';
 import { ErrorFallback } from '../components/ErrorFallback';
 import { TimelineSkeleton } from '../components/LoadingSkeleton';
@@ -33,38 +38,14 @@ export default function Timeline() {
 
   const filteredFolders = FolderSearchFilter(folders, searchQuery);
 
-  const loadMore = useCallback(async () => {
-    if (!user || loadingMore || !hasMore) return;
-    setLoadingMore(true);
-    try {
-      const res = await api.get<{ folders: LocationFolder[]; nextCursor: string | null }>(
-        `/api/v1/folders?limit=${PAGE_SIZE}&cursor=${nextCursor}`
-      );
-      setFolders(prev => {
-        const existingIds = new Set(prev.map(f => f.id));
-        return [...prev, ...res.folders.filter(f => !existingIds.has(f.id!))];
-      });
-      setNextCursor(res.nextCursor);
-      setHasMore(res.nextCursor !== null);
-    } catch (err) {
-      console.error('Failed to load more folders:', err);
-      toast('Không thể tải thêm địa điểm', 'error');
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [user, loadingMore, hasMore, nextCursor, toast]);
-
   const fetchInitial = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get<{ folders: LocationFolder[]; nextCursor: string | null }>(
-        `/api/v1/folders?limit=${PAGE_SIZE}`
-      );
-      setFolders(res.folders);
-      setNextCursor(res.nextCursor);
-      setHasMore(res.nextCursor !== null);
+      const items = await getUserFoldersOptimized(user.uid, 100);
+      setFolders(items);
+      setHasMore(false);
     } catch (err: any) {
       console.error('Failed to load initial folders:', err);
       setError(err instanceof Error ? err : new Error(err?.message || 'Không thể tải danh sách hành trình'));
@@ -78,27 +59,13 @@ export default function Timeline() {
     fetchInitial();
   }, [fetchInitial]);
 
-  // Intersection Observer for infinite scroll
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !searchQuery) {
-          loadMore();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    if (observerRef.current) observer.observe(observerRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, loadingMore, searchQuery, loadMore]);
-
   const handleDelete = async (e: React.MouseEvent, folder: LocationFolder) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!window.confirm('Bạn có chắc chắn muốn xóa địa điểm này cùng tất cả ảnh bên trong?')) return;
+    if (!folder.id || !window.confirm('Bạn có chắc chắn muốn xóa địa điểm này cùng tất cả ảnh bên trong?')) return;
 
     try {
-      await api.delete(`/api/v1/folders/${folder.id}`);
+      await deleteFolderDoc(folder.id);
       setFolders(prev => prev.filter(f => f.id !== folder.id));
       setActionMenuId(null);
       toast('Đã xóa địa điểm thành công', 'success');
@@ -119,13 +86,11 @@ export default function Timeline() {
   const saveEdit = async (e: React.MouseEvent | React.FormEvent, folder: LocationFolder) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!editName.trim()) return;
+    if (!editName.trim() || !folder.id) return;
 
     try {
-      const updated = await api.put<LocationFolder>(`/api/v1/folders/${folder.id}`, {
-        name: editName.trim()
-      });
-      setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, name: updated.name } : f));
+      await updateFolderDoc(folder.id, { name: editName.trim() });
+      setFolders(prev => prev.map(f => f.id === folder.id ? { ...f, name: editName.trim() } : f));
       setEditingId(null);
       toast('Đã đổi tên địa điểm thành công', 'success');
     } catch (err) {
@@ -139,10 +104,14 @@ export default function Timeline() {
     if (!newName.trim() || !user) return;
 
     try {
-      const created = await api.post<LocationFolder>('/api/v1/folders', {
+      const created = await createFolderDoc({
+        uid: user.uid,
         name: newName.trim(),
         centerLat: 10.8231, // Default lat
         centerLng: 106.6297, // Default lng
+        photoCount: 0,
+        createdAt: new Date().toISOString(),
+        visibility: 'private',
       });
       setFolders(prev => [created, ...prev]);
       setIsAdding(false);

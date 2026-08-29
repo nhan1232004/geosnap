@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MapPin, Image as ImageIcon, Users, Zap } from 'lucide-react';
-import { api } from '../lib/api';
+import { getUserFoldersOptimized, getFriendsList } from '../lib/firestoreService';
 
 interface UserStats {
   totalLocations: number;
@@ -24,12 +24,16 @@ export function useUserStats(userId: string | undefined) {
     const fetchStats = async () => {
       setLoading(true);
       try {
-        const res = await api.get<{ stats: any }>('/api/v1/dashboard/stats');
+        const [folders, friends] = await Promise.all([
+          getUserFoldersOptimized(userId, 500),
+          getFriendsList(userId),
+        ]);
+        const totalPhotos = folders.reduce((sum, f) => sum + (f.photoCount || 0), 0);
         setStats({
-          totalLocations: res.stats.totalLocations,
-          totalPhotos: res.stats.totalPhotos,
-          totalFriends: res.stats.totalFriends,
-          totalDistance: 0
+          totalLocations: folders.length,
+          totalPhotos,
+          totalFriends: friends.length,
+          totalDistance: 0,
         });
       } catch (error) {
         console.error('Failed to fetch user stats:', error);
