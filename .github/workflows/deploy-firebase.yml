@@ -39,9 +39,9 @@ jobs:
           if [ -n "$FIREBASE_SERVICE_ACCOUNT" ]; then
             echo "$FIREBASE_SERVICE_ACCOUNT" > sa.json
             export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/sa.json
-            npx firebase-tools deploy --only hosting --project geosnap-4dd7a
+            npx firebase-tools deploy --only hosting,firestore:rules,storage --project geosnap-4dd7a
           elif [ -n "$FIREBASE_TOKEN" ]; then
-            npx firebase-tools deploy --only hosting --token "$FIREBASE_TOKEN" --project geosnap-4dd7a
+            npx firebase-tools deploy --only hosting,firestore:rules,storage --token "$FIREBASE_TOKEN" --project geosnap-4dd7a
           else
             echo "No deploy secret found. Please configure FIREBASE_SERVICE_ACCOUNT_GEOSNAP_4DD7A or FIREBASE_TOKEN in repository secrets."
           fi
