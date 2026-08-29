@@ -32,6 +32,7 @@ service cloud.firestore {
 
     function validOptionalStringLength(field, maxLen) {
       return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
         (request.resource.data[field] is string && request.resource.data[field].size() <= maxLen);
     }
 
@@ -107,11 +108,11 @@ service cloud.firestore {
              data.url is string && data.url.size() <= 2048 &&
              data.uploadedAt is string &&
              data.hasGps is bool &&
-             (!( 'latitude' in data ) || data.latitude is number) &&
-             (!( 'longitude' in data ) || data.longitude is number) &&
-             (!( 'takenAt' in data ) || data.takenAt is string) &&
-             (!( 'folderId' in data ) || data.folderId is string) &&
-             (!( 'visibility' in data ) || data.visibility in ['private', 'friends', 'public']);
+             (!( 'latitude' in data ) || data.latitude == null || data.latitude is number) &&
+             (!( 'longitude' in data ) || data.longitude == null || data.longitude is number) &&
+             (!( 'takenAt' in data ) || data.takenAt == null || data.takenAt is string) &&
+             (!( 'folderId' in data ) || data.folderId == null || data.folderId is string) &&
+             (!( 'visibility' in data ) || data.visibility == null || data.visibility in ['private', 'friends', 'public']);
     }
 
     function isValidFolder(data) {
@@ -127,9 +128,9 @@ service cloud.firestore {
              validOptionalStringLength('district', 100) &&
              validOptionalStringLength('street', 100) &&
              validOptionalStringLength('coverPhotoUrl', 2048) &&
-             (!( 'firstVisitedAt' in data ) || data.firstVisitedAt is string) &&
-             (!( 'lastVisitedAt' in data ) || data.lastVisitedAt is string) &&
-             (!( 'visibility' in data ) || data.visibility in ['private', 'friends', 'public']) &&
+             (!( 'firstVisitedAt' in data ) || data.firstVisitedAt == null || data.firstVisitedAt is string) &&
+             (!( 'lastVisitedAt' in data ) || data.lastVisitedAt == null || data.lastVisitedAt is string) &&
+             (!( 'visibility' in data ) || data.visibility == null || data.visibility in ['private', 'friends', 'public']) &&
              validOptionalStringLength('description', 500);
     }
 

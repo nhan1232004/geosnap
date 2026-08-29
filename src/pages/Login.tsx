@@ -16,6 +16,14 @@ type AuthMode = 'choose' | 'email-login' | 'email-register' | 'forgot-password';
 
 function getFirebaseAuthErrorMessage(code: string, fallback: string): string {
   switch (code) {
+    case 'auth/popup-closed-by-user':
+      return 'Cửa sổ đăng nhập Google đã bị đóng trước khi hoàn tất.';
+    case 'auth/unauthorized-domain':
+      return 'Tên miền chưa được cấp quyền trong Firebase Console (Authentication > Settings > Authorized domains).';
+    case 'auth/operation-not-allowed':
+      return 'Đăng nhập bằng Google chưa được bật trong Firebase Authentication.';
+    case 'auth/account-exists-with-different-credential':
+      return 'Email này đã được sử dụng với một phương thức đăng nhập khác.';
     case 'auth/user-not-found':
     case 'auth/wrong-password':
     case 'auth/invalid-credential':
@@ -31,11 +39,13 @@ function getFirebaseAuthErrorMessage(code: string, fallback: string): string {
     case 'auth/missing-initial-state':
     case 'auth/popup-blocked':
     case 'auth/cancelled-popup-request':
-      return 'Trên ứng dụng điện thoại, vui lòng đăng nhập hoặc đăng ký bằng Email bên dưới.';
+      return 'Trình duyệt đã chặn cửa sổ đăng nhập Popup. Vui lòng cho phép popup hoặc đăng nhập bằng Email.';
     case 'auth/too-many-requests':
       return 'Quá nhiều lần thử thất bại. Vui lòng đợi 1 phút và thử lại.';
+    case 'permission-denied':
+      return 'Lỗi phân quyền Firestore khi tải thông tin tài khoản.';
     default:
-      return fallback;
+      return code ? `${fallback} (${code})` : fallback;
   }
 }
 
@@ -78,13 +88,36 @@ export default function Login() {
     try {
       const cred = await signInWithPopup(auth, googleProvider);
 
-      const userDocRef = doc(db, 'users', cred.user.uid);
-      const userDoc = await getDoc(userDocRef);
       let profile: UserProfile;
+      try {
+        const userDocRef = doc(db, 'users', cred.user.uid);
+        const userDoc = await getDoc(userDocRef);
 
-      if (userDoc.exists()) {
-        profile = userDoc.data() as UserProfile;
-      } else {
+        if (userDoc.exists()) {
+          profile = userDoc.data() as UserProfile;
+        } else {
+          profile = {
+            uid: cred.user.uid,
+            email: cred.user.email || '',
+            displayName: cred.user.displayName || 'User',
+            avatarUrl: cred.user.photoURL || undefined,
+            role: 'user',
+            createdAt: new Date().toISOString(),
+          };
+          const docData: Record<string, any> = {
+            uid: profile.uid,
+            email: profile.email,
+            displayName: profile.displayName,
+            role: profile.role,
+            createdAt: profile.createdAt,
+          };
+          if (profile.avatarUrl) {
+            docData.avatarUrl = profile.avatarUrl;
+          }
+          await setDoc(userDocRef, docData, { merge: true });
+        }
+      } catch (firestoreErr) {
+        console.warn('Could not read/write user profile to Firestore:', firestoreErr);
         profile = {
           uid: cred.user.uid,
           email: cred.user.email || '',
@@ -93,7 +126,6 @@ export default function Login() {
           role: 'user',
           createdAt: new Date().toISOString(),
         };
-        await setDoc(userDocRef, profile, { merge: true });
       }
 
       setUser({
@@ -105,7 +137,7 @@ export default function Login() {
       setUserProfile(profile);
     } catch (err: any) {
       console.error('Google Sign In Error:', err);
-      setError(getFirebaseAuthErrorMessage(err.code, 'Đăng nhập Google không thành công.'));
+      setError(getFirebaseAuthErrorMessage(err.code, err.message || 'Đăng nhập Google không thành công.'));
     } finally { setLoading(false); }
   };
 

@@ -9,7 +9,7 @@ import {
   getAuth,
   Auth,
 } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -39,7 +39,16 @@ try {
 }
 
 export const auth = authInstance;
-export const db = getFirestore(app);
+
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(app, {
+    ignoreUndefinedProperties: true,
+  });
+} catch {
+  dbInstance = getFirestore(app);
+}
+export const db = dbInstance;
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
